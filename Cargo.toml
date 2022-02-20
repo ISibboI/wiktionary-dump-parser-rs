@@ -11,3 +11,10 @@ name = "wiktionary-dump-parser"
 [lib]
 
 [dependencies]
+tokio = {version = "1.17.0", features = ["full"]}
+reqwest = "0.11.9"
+clap = {version = "3.1.0", features = ["derive"]}
+log = "0.4.14"
+simplelog = "0.11.2"
+regex = "1.5.4"
+lazy_static = "1.4.0"
