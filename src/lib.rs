@@ -29,12 +29,23 @@ impl DumpIndexUrl {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum LanguageCode {
+    English,
+    French,
+    Russian,
+    German,
+    Finnish,
     Unknown(String),
 }
 
 impl<'a> From<&'a str> for LanguageCode {
     fn from(string: &'a str) -> Self {
-        Self::Unknown(string.to_string())
+        match string {
+            "en" => Self::English,
+            "fr" => Self::French,
+            "ru" => Self::Russian,
+            "de" => Self::German,
+            "fi" => Self::Finnish,
+            string => Self::Unknown(string.to_string()), }
     }
 }
 
