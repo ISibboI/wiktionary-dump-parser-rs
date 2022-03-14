@@ -1,13 +1,17 @@
 use clap::Parser;
 use log::{info, LevelFilter};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode};
+use std::path::PathBuf;
 use wiktionary_dump_parser::error::{Error, Result};
-use wiktionary_dump_parser::{list_wiktionary_dump_languages, download_language};
 use wiktionary_dump_parser::language_code::LanguageCode;
 use wiktionary_dump_parser::urls::{DumpBaseUrl, DumpIndexUrl};
+use wiktionary_dump_parser::{download_language, list_wiktionary_dump_languages};
 
 #[derive(Parser)]
 struct Configuration {
+    #[clap(long, default_value = "Info")]
+    log_level: LevelFilter,
+
     #[clap(subcommand)]
     command: CliCommand,
 }
@@ -23,14 +27,17 @@ enum CliCommand {
         english_name: Option<String>,
         #[clap(long)]
         wiktionary_abbreviation: Option<String>,
+        #[clap(long, default_value = ".")]
+        target_directory: PathBuf,
+        #[clap(long, default_value = "10")]
+        progress_delay: u64,
     },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    initialise_logging();
-
     let configuration = Configuration::parse();
+    initialise_logging(configuration.log_level);
 
     match configuration.command {
         CliCommand::ListAvailableLanguages => {
@@ -39,7 +46,12 @@ async fn main() -> Result<()> {
             }
         }
 
-        CliCommand::DownloadLanguage {english_name, wiktionary_abbreviation} => {
+        CliCommand::DownloadLanguage {
+            english_name,
+            wiktionary_abbreviation,
+            target_directory,
+            progress_delay,
+        } => {
             let language_code = match (english_name, wiktionary_abbreviation) {
                 (Some(english_name), None) => LanguageCode::from_english_name(&english_name)?,
                 (None, Some(wiktionary_abbreviation)) => LanguageCode::from_wiktionary_abbreviation(&wiktionary_abbreviation)?,
@@ -48,7 +60,13 @@ async fn main() -> Result<()> {
             };
 
             info!("Downloading language '{language_code:?}'");
-            download_language(&DumpBaseUrl::Default, &language_code).await?;
+            download_language(
+                &DumpBaseUrl::Default,
+                &language_code,
+                &target_directory,
+                progress_delay,
+            )
+            .await?;
         }
     }
 
@@ -56,13 +74,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn initialise_logging() {
+fn initialise_logging(log_level: LevelFilter) {
     CombinedLogger::init(vec![TermLogger::new(
-        if cfg!(debug_assertions) {
-            LevelFilter::Debug
-        } else {
-            LevelFilter::Info
-        },
+        log_level,
         Config::default(),
         TerminalMode::Mixed,
         ColorChoice::Auto,

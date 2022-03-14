@@ -6,6 +6,7 @@ pub enum Error {
     RegexError(regex::Error),
     UrlParseError(url::ParseError),
     SerdeJsonError(serde_json::Error),
+    IoError(std::io::Error),
 
     /// The given english language name is unknown.
     UnknownEnglishLanguageName(String),
@@ -38,5 +39,11 @@ impl From<url::ParseError> for Error {
 impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Self {
         Self::SerdeJsonError(error)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::IoError(error)
     }
 }
