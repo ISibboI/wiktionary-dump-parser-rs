@@ -26,3 +26,4 @@ itertools = "0.10.3"
 lexiclean = "0.0.1"
 futures-util = "0.3.21"
 num-integer = "0.1.44"
+bzip2 = {version = "0.4.3", features = ["tokio"]}
