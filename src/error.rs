@@ -1,3 +1,5 @@
+use std::string::FromUtf8Error;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
@@ -7,6 +9,7 @@ pub enum Error {
     UrlParseError(url::ParseError),
     SerdeJsonError(serde_json::Error),
     IoError(std::io::Error),
+    FromUtf8Error(std::string::FromUtf8Error),
 
     /// The given english language name is unknown.
     UnknownEnglishLanguageName(String),
@@ -45,5 +48,11 @@ impl From<serde_json::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Self {
         Self::IoError(error)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(error: FromUtf8Error) -> Self {
+        Self::FromUtf8Error(error)
     }
 }

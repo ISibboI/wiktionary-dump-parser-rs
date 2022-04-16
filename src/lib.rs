@@ -15,6 +15,7 @@ pub mod download;
 pub mod error;
 pub mod language_code;
 pub mod urls;
+pub mod parser;
 
 lazy_static! {
     static ref LIST_WIKTIONARY_DUMP_LANGUAGES_REGEX: Regex =

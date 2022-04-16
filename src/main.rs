@@ -1,11 +1,11 @@
 use clap::Parser;
 use log::{info, LevelFilter};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode};
-use std::path::PathBuf;
+use std::path::{PathBuf};
 use wiktionary_dump_parser::error::{Error, Result};
 use wiktionary_dump_parser::language_code::LanguageCode;
 use wiktionary_dump_parser::urls::{DumpBaseUrl, DumpIndexUrl};
-use wiktionary_dump_parser::{download_language, list_wiktionary_dump_languages};
+use wiktionary_dump_parser::{download_language, list_wiktionary_dump_languages, parser::parse_dump_file};
 
 #[derive(Parser)]
 struct Configuration {
@@ -32,6 +32,13 @@ enum CliCommand {
         #[clap(long, default_value = "10")]
         progress_delay: u64,
     },
+
+    ParseDumpFile {
+        #[clap(long)]
+        input_file: PathBuf,
+        #[clap(long)]
+        output_file: PathBuf
+    }
 }
 
 #[tokio::main]
@@ -59,7 +66,7 @@ async fn main() -> Result<()> {
                 (Some(english_name), Some(wiktionary_abbreviation)) => return Err(Error::Other(format!("Specified both the english name '{english_name}' and the wiktionary abbreviation '{wiktionary_abbreviation}' of the language to download."))),
             };
 
-            info!("Downloading language '{language_code:?}'");
+            info!("Downloading language {language_code:?}");
             download_language(
                 &DumpBaseUrl::Default,
                 &language_code,
@@ -67,6 +74,11 @@ async fn main() -> Result<()> {
                 progress_delay,
             )
             .await?;
+        }
+
+        CliCommand::ParseDumpFile {input_file, output_file} => {
+            info!("Parsing dump file {input_file:?} into {output_file:?}");
+            parse_dump_file(&input_file, &output_file).await?;
         }
     }
 
