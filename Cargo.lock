@@ -716,6 +716,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-xml"
+version = "0.23.0-alpha3"
+source = "git+https://github.com/ISibboI/quick-xml#7245623ba72c70720de4c706407f71de2f854903"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1245,6 +1253,7 @@ dependencies = [
  "lexiclean",
  "log",
  "num-integer",
+ "quick-xml",
  "regex",
  "reqwest",
  "serde",

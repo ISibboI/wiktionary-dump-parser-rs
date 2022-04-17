@@ -10,6 +10,7 @@ pub enum Error {
     SerdeJsonError(serde_json::Error),
     IoError(std::io::Error),
     FromUtf8Error(std::string::FromUtf8Error),
+    QuickXmlError(quick_xml::Error),
 
     /// The given english language name is unknown.
     UnknownEnglishLanguageName(String),
@@ -54,5 +55,11 @@ impl From<std::io::Error> for Error {
 impl From<std::string::FromUtf8Error> for Error {
     fn from(error: FromUtf8Error) -> Self {
         Self::FromUtf8Error(error)
+    }
+}
+
+impl From<quick_xml::Error> for Error {
+    fn from(error: quick_xml::Error) -> Self {
+        Self::QuickXmlError(error)
     }
 }
