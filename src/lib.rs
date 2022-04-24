@@ -145,8 +145,15 @@ pub async fn download_language(
     target_file.push(language_abbreviation);
     target_file.push(date);
     target_file.push(file_name);
-    download_file_with_progress_log(&url, target_file, properties.size, progress_delay).await?;
-    // TODO verify checksums
+    download_file_with_progress_log(
+        &url,
+        target_file,
+        properties.size,
+        progress_delay,
+        Some(&properties.md5),
+        Some(&properties.sha1),
+    )
+    .await?;
 
     Ok(())
 }

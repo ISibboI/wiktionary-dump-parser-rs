@@ -28,3 +28,6 @@ futures-util = "0.3.21"
 num-integer = "0.1.44"
 bzip2 = {version = "0.4.3", features = ["tokio"]}
 quick-xml = {git = "https://github.com/ISibboI/quick-xml", rev = "7245623ba72c70720de4c706407f71de2f854903"}
+digest = "0.10.3"
+md-5 = "0.10.1"
+sha1 = "0.10.1"

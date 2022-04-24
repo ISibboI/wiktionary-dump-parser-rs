@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::parser::xml::{read_relevant_event, RelevantEvent};
 use crate::Error;
 use bzip2::bufread::MultiBzDecoder;
-use log::{debug, info, trace};
+use log::{debug, info};
 use quick_xml::events::attributes::Attributes;
 use quick_xml::Reader;
 use serde::Deserialize;
@@ -22,6 +22,17 @@ mod xml;
 pub struct Siteinfo {
     sitename: String,
     dbname: String,
+    base: String,
+    generator: String,
+    case: String,
+    namespaces: Vec<Namespace>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct Namespace {
+    key: i32,
+    case: String,
+    name: String,
 }
 
 struct TokioReadAdapter<R>(R);
@@ -170,7 +181,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                                 "page" => {
                                     parse_page(tag.attributes(), &mut reader, &mut buffer).await?
                                 }
-                                other => {
+                                _ => {
                                     return Err(Error::Other(format!(
                                         "Found unexpected level 1 tag {tag:?}"
                                     )))
@@ -225,27 +236,38 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
 
     let mut sitename = None;
     let mut dbname = None;
+    let mut base = None;
+    let mut generator = None;
+    let mut case = None;
+    let mut namespaces = None;
 
-    let mut level = 1; // opening tag was consumed by caller
     loop {
         match read_relevant_event(reader, buffer)? {
-            RelevantEvent::Start(tag) => {
-                level += 1;
-                match tag.name() {
-                    b"sitename" => {
-                        sitename =
-                            Some(parse_string("sitename", tag.attributes(), reader, buffer).await?);
-                    }
-                    b"dbname" => {
-                        dbname =
-                            Some(parse_string("dbname", tag.attributes(), reader, buffer).await?);
-                    }
-                    other => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
+            RelevantEvent::Start(tag) => match tag.name() {
+                b"sitename" => {
+                    sitename =
+                        Some(parse_string("sitename", tag.attributes(), reader, buffer).await?);
                 }
-            }
+                b"dbname" => {
+                    dbname = Some(parse_string("dbname", tag.attributes(), reader, buffer).await?);
+                }
+                b"base" => {
+                    base = Some(parse_string("base", tag.attributes(), reader, buffer).await?);
+                }
+                b"generator" => {
+                    generator =
+                        Some(parse_string("generator", tag.attributes(), reader, buffer).await?);
+                }
+                b"case" => {
+                    case = Some(parse_string("case", tag.attributes(), reader, buffer).await?);
+                }
+                b"namespaces" => {
+                    namespaces = Some(parse_namespaces(tag.attributes(), reader, buffer).await?);
+                }
+                _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
+            },
             RelevantEvent::End(tag) => {
-                level -= 1;
-                return if level == 0 && tag.name() == b"siteinfo" {
+                return if tag.name() == b"siteinfo" {
                     Ok(Siteinfo {
                         sitename: if let Some(sitename) = sitename {
                             sitename
@@ -256,6 +278,26 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
                             dbname
                         } else {
                             return Err(Error::Other(format!("Missing dbname in siteinfo")));
+                        },
+                        base: if let Some(base) = base {
+                            base
+                        } else {
+                            return Err(Error::Other(format!("Missing base in siteinfo")));
+                        },
+                        generator: if let Some(generator) = generator {
+                            generator
+                        } else {
+                            return Err(Error::Other(format!("Missing generator in siteinfo")));
+                        },
+                        case: if let Some(case) = case {
+                            case
+                        } else {
+                            return Err(Error::Other(format!("Missing case in siteinfo")));
+                        },
+                        namespaces: if let Some(namespaces) = namespaces {
+                            namespaces
+                        } else {
+                            return Err(Error::Other(format!("Missing namespaces in siteinfo")));
                         },
                     })
                 } else {
@@ -269,6 +311,91 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
             }
             RelevantEvent::Text(text) => {
                 debug!("{text:?}")
+            }
+            RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
+        }
+    }
+}
+
+async fn parse_namespaces<'attributes, InputStream: BufRead>(
+    mut attributes: Attributes<'attributes>,
+    reader: &mut Reader<InputStream>,
+    buffer: &mut Vec<u8>,
+) -> Result<Vec<Namespace>> {
+    if let Some(attribute) = attributes.next() {
+        return Err(Error::Other(format!("Unexpected attribute {attribute:?}")));
+    }
+
+    struct NamespaceTag {
+        key: i32,
+        case: String,
+    }
+    let mut current_namespace_tag = None;
+    let mut namespaces = Vec::new();
+
+    loop {
+        match read_relevant_event(reader, buffer)? {
+            RelevantEvent::Start(tag) => {
+                if tag.name() == b"namespace" {
+                    if current_namespace_tag.is_some() {
+                        return Err(Error::Other(format!("Found nested namespace tag {tag:?}")));
+                    }
+
+                    current_namespace_tag = Some(NamespaceTag {
+                        key: String::from_utf8_lossy(
+                            &tag.try_get_attribute(b"key")?
+                                .ok_or_else(|| {
+                                    Error::Other(format!("Missing attribute key in {tag:?}"))
+                                })?
+                                .value,
+                        )
+                        .parse()
+                        .map_err(|_| Error::Other(format!("Key is not an integer in {tag:?}")))?,
+                        case: String::from_utf8_lossy(
+                            &tag.try_get_attribute(b"case")?
+                                .ok_or_else(|| {
+                                    Error::Other(format!("Missing attribute case in {tag:?}"))
+                                })?
+                                .value,
+                        )
+                        .into_owned(),
+                    });
+                } else {
+                    return Err(Error::Other(format!("Found unexpected tag {tag:?}")));
+                }
+            }
+            RelevantEvent::End(tag) => {
+                if tag.name() == b"namespaces" {
+                    return Ok(namespaces);
+                } else if tag.name() == b"namespace" {
+                    if current_namespace_tag.is_some() {
+                        return Err(Error::Other(format!(
+                            "Found namespace tag without text {tag:?}"
+                        )));
+                    }
+                } else {
+                    return Err(Error::Other(format!(
+                        "Found unexpected closing tag {tag:?}"
+                    )));
+                };
+            }
+            RelevantEvent::Empty(tag) => {
+                debug!("{tag:?}")
+            }
+            RelevantEvent::Text(text) => {
+                if let Some(current_namespace_tag) = current_namespace_tag {
+                    namespaces.push(Namespace {
+                        key: current_namespace_tag.key,
+                        case: current_namespace_tag.case,
+                        name: String::from_utf8_lossy(&text).into_owned(),
+                    });
+                } else {
+                    return Err(Error::Other(format!(
+                        "Found text outside of namespace tag: {text:?}"
+                    )));
+                }
+
+                current_namespace_tag = None;
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
@@ -316,5 +443,5 @@ async fn parse_page<'attributes, InputStream: BufRead>(
     reader: &mut Reader<InputStream>,
     buffer: &mut Vec<u8>,
 ) -> Result<()> {
-    todo!()
+    todo!("parse_page")
 }

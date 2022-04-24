@@ -1,8 +1,11 @@
 use crate::error::{Error, Result};
+use digest::Digest;
 use futures_util::stream::StreamExt;
 use lexiclean::Lexiclean;
 use log::{debug, info, warn};
+use md5::Md5;
 use num_integer::Integer;
+use sha1::Sha1;
 use std::collections::VecDeque;
 use std::env;
 use std::path::PathBuf;
@@ -17,7 +20,9 @@ pub async fn download_file_with_progress_log(
     to_path: impl Into<PathBuf>,
     expected_size: usize,
     progress_delay: u64,
-) -> Result<()> {
+    md5: Option<&str>,
+    sha1: Option<&str>,
+) -> Result<PathBuf> {
     let mut to_path = to_path.into();
     if to_path.is_relative() {
         let mut current_dir = env::current_dir()?;
@@ -71,8 +76,20 @@ pub async fn download_file_with_progress_log(
     // Cannot fail as maximum value is 60.
     let retained_content_length_amount: usize = (60 / progress_delay).max(1).try_into().unwrap();
     last_content_lengths.push_back((0, Instant::now()));
+
+    let mut md5_digest = Md5::default();
+    let mut sha1_digest = Sha1::default();
+
     while let Some(chunk) = input_stream.next().await {
         let chunk = chunk?;
+
+        if md5.is_some() {
+            md5_digest.update(&chunk);
+        }
+        if sha1.is_some() {
+            sha1_digest.update(&chunk);
+        }
+
         output_file.write_all(&chunk).await?;
 
         let now = Instant::now();
@@ -125,6 +142,34 @@ pub async fn download_file_with_progress_log(
     debug!("Download finished");
     drop(input_stream);
 
+    if let Some(md5) = md5 {
+        debug!("Verifying md5 checksum");
+        let md5_digest = format!("{:x}", md5_digest.finalize());
+        if md5_digest == md5 {
+            debug!("Md5 checksum matches");
+        } else {
+            return Err(Error::Other(format!(
+                "Md5 checksum is '{md5_digest}', but should be '{md5}'"
+            )));
+        }
+    } else {
+        debug!("No md5 checksum given, skipping verification");
+    }
+
+    if let Some(sha1) = sha1 {
+        debug!("Verifying sha1 checksum");
+        let sha1_digest = format!("{:x}", sha1_digest.finalize());
+        if sha1_digest == sha1 {
+            debug!("Sha1 checksum matches");
+        } else {
+            return Err(Error::Other(format!(
+                "Sha1 checksum is '{sha1_digest}', but should be '{sha1}'"
+            )));
+        }
+    } else {
+        debug!("No sha1 checksum given, skipping verification");
+    }
+
     let output_file_length = output_file.metadata().await?.len();
     if output_file_length != expected_content_length {
         return Err(Error::Other(format!("Content length mismatch, status file declares {expected_content_length}, but we received {output_file_length}")));
@@ -133,5 +178,5 @@ pub async fn download_file_with_progress_log(
     drop(output_file);
 
     info!("Finished downloading file from '{from_url}' to '{to_path_string}'");
-    Ok(())
+    Ok(to_path)
 }
