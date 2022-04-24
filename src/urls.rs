@@ -2,8 +2,8 @@ use crate::error::Result;
 use crate::language_code::LanguageCode;
 use url::Url;
 
-static DUMP_INDEX_URL: &'static str = "https://dumps.wikimedia.org/backup-index.html";
-static DUMP_BASE_URL: &'static str = "https://ftp.acc.umu.se/mirror/wikimedia.org/dumps";
+static DUMP_INDEX_URL: &str = "https://dumps.wikimedia.org/backup-index.html";
+static DUMP_BASE_URL: &str = "https://ftp.acc.umu.se/mirror/wikimedia.org/dumps";
 
 pub fn dump_status_file(
     base_url: &DumpBaseUrl,

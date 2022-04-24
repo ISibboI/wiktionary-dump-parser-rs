@@ -1,3 +1,5 @@
+#![allow(clippy::useless_format)]
+
 use crate::download::download_file_with_progress_log;
 use crate::error::Error;
 use crate::language_code::LanguageCode;
@@ -14,8 +16,8 @@ use std::path::PathBuf;
 pub mod download;
 pub mod error;
 pub mod language_code;
-pub mod urls;
 pub mod parser;
+pub mod urls;
 
 lazy_static! {
     static ref LIST_WIKTIONARY_DUMP_LANGUAGES_REGEX: Regex =
