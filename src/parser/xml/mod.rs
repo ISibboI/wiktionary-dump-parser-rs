@@ -1,6 +1,6 @@
 use crate::error::Result;
 use log::{debug, trace};
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::Reader;
 use std::io::BufRead;
 
@@ -13,7 +13,7 @@ pub enum RelevantEvent<'a> {
     /// Empty element tag (with attributes) `<tag attr="value" />`.
     Empty(BytesStart<'a>),
     /// Character data between `Start` and `End` element.
-    Text(BytesText<'a>),
+    Text(String),
     /// End of XML document.
     Eof,
 }
@@ -42,7 +42,8 @@ pub fn read_relevant_event<'reader, 'buffer, 'result>(
             }
             Event::Text(text) => {
                 if text.iter().any(|byte| !byte.is_ascii_whitespace()) {
-                    relevant_event = RelevantEvent::Text(BytesText::from_escaped(text.to_vec()));
+                    let unescaped = text.unescaped()?.to_vec();
+                    relevant_event = RelevantEvent::Text(String::from_utf8(unescaped)?);
                     break;
                 }
             }

@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::parser::xml::{read_relevant_event, RelevantEvent};
 use crate::Error;
 use bzip2::bufread::MultiBzDecoder;
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 use quick_xml::events::attributes::Attributes;
 use quick_xml::Reader;
 use serde::Deserialize;
@@ -30,7 +30,7 @@ pub struct Siteinfo {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Namespace {
-    key: i32,
+    key: i64,
     case: String,
     name: String,
 }
@@ -331,7 +331,7 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
     }
 
     struct NamespaceTag {
-        key: i32,
+        key: i64,
         case: String,
     }
     let mut current_namespace_tag = None;
@@ -391,7 +391,7 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
                     namespaces.push(Namespace {
                         key: current_namespace_tag.key,
                         case: current_namespace_tag.case,
-                        name: String::from_utf8_lossy(&text).into_owned(),
+                        name: text,
                     });
                 } else {
                     return Err(Error::Other(format!(
@@ -409,8 +409,8 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Page {
     title: String,
-    namespace: i32,
-    id: String,
+    namespace: i64,
+    id: i64,
     revision: Revision,
 }
 
@@ -445,7 +445,14 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                     );
                 }
                 b"id" => {
-                    id = Some(parse_string("id", tag.attributes(), reader, buffer).await?);
+                    id = Some(
+                        parse_string("id", tag.attributes(), reader, buffer)
+                            .await?
+                            .parse()
+                            .map_err(|_| {
+                                Error::Other(format!("id is not an integer in {tag:?}"))
+                            })?,
+                    );
                 }
                 b"revision" => {
                     revision = Some(parse_revision(tag.attributes(), reader, buffer).await?);
@@ -495,7 +502,15 @@ async fn parse_page<'attributes, InputStream: BufRead>(
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Revision {
-    id: String,
+    id: i64,
+    parentid: Option<i64>,
+    timestamp: String,
+    contributor: Contributor,
+    comment: Option<String>,
+    model: String,
+    format: String,
+    text: Option<Text>,
+    sha1: String,
 }
 
 async fn parse_revision<'attributes, InputStream: BufRead>(
@@ -508,24 +523,177 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
     }
 
     let mut id = None;
+    let mut parentid = None;
+    let mut timestamp = None;
+    let mut contributor = None;
+    let mut comment = None;
+    let mut model = None;
+    let mut format = None;
+    let mut text = None;
+    let mut sha1 = None;
 
     loop {
         match read_relevant_event(reader, buffer)? {
             RelevantEvent::Start(tag) => match tag.name() {
                 b"id" => {
-                    id = Some(parse_string("id", tag.attributes(), reader, buffer).await?);
+                    id = Some(
+                        parse_string("id", tag.attributes(), reader, buffer)
+                            .await?
+                            .parse()
+                            .map_err(|_| {
+                                Error::Other(format!("id is not an integer in {tag:?}"))
+                            })?,
+                    );
+                }
+                b"parentid" => {
+                    parentid = Some(
+                        parse_string("parentid", tag.attributes(), reader, buffer)
+                            .await?
+                            .parse()
+                            .map_err(|_| {
+                                Error::Other(format!("parentid is not an integer in {tag:?}"))
+                            })?,
+                    );
+                }
+                b"timestamp" => {
+                    timestamp =
+                        Some(parse_string("timestamp", tag.attributes(), reader, buffer).await?);
+                }
+                b"contributor" => {
+                    contributor = Some(parse_contributor(tag.attributes(), reader, buffer).await?);
+                }
+                b"comment" => {
+                    comment =
+                        Some(parse_string("comment", tag.attributes(), reader, buffer).await?);
+                }
+                b"model" => {
+                    model = Some(parse_string("model", tag.attributes(), reader, buffer).await?);
+                }
+                b"format" => {
+                    format = Some(parse_string("format", tag.attributes(), reader, buffer).await?);
+                }
+                b"text" => {
+                    text = Some(parse_text(tag.attributes(), reader, buffer).await?);
+                }
+                b"sha1" => {
+                    sha1 = Some(parse_string("sha1", tag.attributes(), reader, buffer).await?);
                 }
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
             },
             RelevantEvent::End(tag) => {
                 return if tag.name() == b"revision" {
+                    if text.is_none() {
+                        warn!("No text for page with id {id:?} and comment {comment:?}");
+                    }
+
                     Ok(Revision {
                         id: if let Some(id) = id {
                             id
                         } else {
                             return Err(Error::Other(format!("Missing id in revision")));
                         },
+                        parentid,
+                        timestamp: if let Some(timestamp) = timestamp {
+                            timestamp
+                        } else {
+                            return Err(Error::Other(format!("Missing timestamp in revision")));
+                        },
+                        contributor: if let Some(contributor) = contributor {
+                            contributor
+                        } else {
+                            return Err(Error::Other(format!("Missing contributor in revision")));
+                        },
+                        comment,
+                        model: if let Some(model) = model {
+                            model
+                        } else {
+                            return Err(Error::Other(format!("Missing model in revision")));
+                        },
+                        format: if let Some(format) = format {
+                            format
+                        } else {
+                            return Err(Error::Other(format!("Missing format in revision")));
+                        },
+                        text,
+                        sha1: if let Some(sha1) = sha1 {
+                            sha1
+                        } else {
+                            return Err(Error::Other(format!("Missing sha1 in revision")));
+                        },
                     })
+                } else {
+                    Err(Error::Other(format!(
+                        "Found unexpected closing tag {tag:?}"
+                    )))
+                };
+            }
+            RelevantEvent::Empty(tag) => {
+                match tag.name() {
+                    b"minor" => { /* ignore */ }
+                    _ => debug!("{tag:?}"),
+                }
+            }
+            RelevantEvent::Text(text) => {
+                debug!("{text:?}")
+            }
+            RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub enum Contributor {
+    User { username: String, id: i64 },
+    Anonymous { ip: String },
+}
+
+async fn parse_contributor<'attributes, InputStream: BufRead>(
+    mut attributes: Attributes<'attributes>,
+    reader: &mut Reader<InputStream>,
+    buffer: &mut Vec<u8>,
+) -> Result<Contributor> {
+    if let Some(attribute) = attributes.next() {
+        return Err(Error::Other(format!("Unexpected attribute {attribute:?}")));
+    }
+
+    let mut username = None;
+    let mut id: Option<i64> = None;
+    let mut ip = None;
+
+    loop {
+        match read_relevant_event(reader, buffer)? {
+            RelevantEvent::Start(tag) => match tag.name() {
+                b"username" => {
+                    username =
+                        Some(parse_string("username", tag.attributes(), reader, buffer).await?);
+                }
+                b"id" => {
+                    id = Some(
+                        parse_string("id", tag.attributes(), reader, buffer)
+                            .await?
+                            .parse()
+                            .map_err(|_| {
+                                Error::Other(format!("id is not an integer in {tag:?}"))
+                            })?,
+                    );
+                }
+                b"ip" => {
+                    ip = Some(parse_string("ip", tag.attributes(), reader, buffer).await?);
+                }
+                _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
+            },
+            RelevantEvent::End(tag) => {
+                return if tag.name() == b"contributor" {
+                    if let (Some(username), Some(id), None) = (&username, &id, &ip) {
+                        Ok(Contributor::User {
+                            username: username.clone(),
+                            id: id.clone(),
+                        })
+                    } else if let (None, None, Some(ip)) = (&username, &id, &ip) {
+                        Ok(Contributor::Anonymous { ip: ip.clone() })
+                    } else {
+                        Err(Error::Other(format!("Unknown combination of fields for contributor: {username:?}, {id:?}, {ip:?}")))
+                    }
                 } else {
                     Err(Error::Other(format!(
                         "Found unexpected closing tag {tag:?}"
@@ -537,6 +705,99 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
             }
             RelevantEvent::Text(text) => {
                 debug!("{text:?}")
+            }
+            RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct Text {
+    xml_space: XmlSpace,
+    text: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub enum XmlSpace {
+    Preserve,
+}
+
+async fn parse_text<'attributes, InputStream: BufRead>(
+    mut attributes: Attributes<'attributes>,
+    reader: &mut Reader<InputStream>,
+    buffer: &mut Vec<u8>,
+) -> Result<Text> {
+    let mut bytes: Option<usize> = None;
+    let mut xml_space = None;
+
+    while let Some(attribute) = attributes.next() {
+        let attribute = attribute?;
+        match attribute.key {
+            b"bytes" => {
+                bytes = Some(
+                    String::from_utf8(attribute.value.to_vec())?
+                        .parse()
+                        .map_err(|_| {
+                            Error::Other(format!("bytes is not an integer in {attribute:?}"))
+                        })?,
+                );
+            }
+            b"xml:space" => {
+                xml_space = Some(match attribute.value.as_ref() {
+                    b"preserve" => XmlSpace::Preserve,
+                    _ => {
+                        return Err(Error::Other(format!(
+                            "Found unexpected attribute value {attribute:?}"
+                        )))
+                    }
+                });
+            }
+            _ => {
+                return Err(Error::Other(format!(
+                    "Found unexpected attribute {attribute:?}"
+                )))
+            }
+        }
+    }
+
+    let mut text = None;
+
+    loop {
+        match read_relevant_event(reader, buffer)? {
+            RelevantEvent::Start(tag) => match tag.name() {
+                _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
+            },
+            RelevantEvent::End(tag) => {
+                return if tag.name() == b"text" {
+                    Ok(Text {
+                        xml_space: if let Some(xml_space) = xml_space {
+                            xml_space
+                        } else {
+                            return Err(Error::Other(format!("Missing tag xml:space in text")));
+                        },
+                        text: if let Some(text) = text {
+                            text
+                        } else {
+                            return Err(Error::Other(format!("Missing text in text")));
+                        },
+                    })
+                } else {
+                    Err(Error::Other(format!(
+                        "Found unexpected closing tag {tag:?}"
+                    )))
+                };
+            }
+            RelevantEvent::Empty(tag) => {
+                debug!("{tag:?}")
+            }
+            RelevantEvent::Text(raw_text) => {
+                if let Some(bytes) = bytes {
+                    let raw_text_len = raw_text.len();
+                    if raw_text_len != bytes {
+                        warn!("Text length mismatch, attribute states {bytes}, but we got {raw_text_len}");
+                    }
+                }
+                text = Some(raw_text);
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
@@ -573,7 +834,7 @@ async fn parse_string<'attributes, InputStream: BufRead>(
             RelevantEvent::Empty(tag) => {
                 debug!("{tag:?}")
             }
-            RelevantEvent::Text(text) => value = String::from_utf8(text.to_vec())?,
+            RelevantEvent::Text(text) => value = text,
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
     }
