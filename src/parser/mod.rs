@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::parser::xml::{read_relevant_event, RelevantEvent};
 use crate::Error;
 use bzip2::bufread::MultiBzDecoder;
-use log::{debug, info};
+use log::{debug, info, trace};
 use quick_xml::events::attributes::Attributes;
 use quick_xml::Reader;
 use serde::Deserialize;
@@ -179,7 +179,11 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                                     serde_json::to_writer(&mut output_stream, &siteinfo)?;
                                 }
                                 "page" => {
-                                    parse_page(tag.attributes(), &mut reader, &mut buffer).await?
+                                    let page =
+                                        parse_page(tag.attributes(), &mut reader, &mut buffer)
+                                            .await?;
+                                    trace!("{page:?}");
+                                    serde_json::to_writer(&mut output_stream, &page)?;
                                 }
                                 _ => {
                                     return Err(Error::Other(format!(
@@ -402,6 +406,143 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct Page {
+    title: String,
+    namespace: i32,
+    id: String,
+    revision: Revision,
+}
+
+async fn parse_page<'attributes, InputStream: BufRead>(
+    mut attributes: Attributes<'attributes>,
+    reader: &mut Reader<InputStream>,
+    buffer: &mut Vec<u8>,
+) -> Result<Page> {
+    if let Some(attribute) = attributes.next() {
+        return Err(Error::Other(format!("Unexpected attribute {attribute:?}")));
+    }
+
+    let mut title = None;
+    let mut namespace = None;
+    let mut id = None;
+    let mut revision = None;
+
+    loop {
+        match read_relevant_event(reader, buffer)? {
+            RelevantEvent::Start(tag) => match tag.name() {
+                b"title" => {
+                    title = Some(parse_string("title", tag.attributes(), reader, buffer).await?);
+                }
+                b"ns" => {
+                    namespace = Some(
+                        parse_string("ns", tag.attributes(), reader, buffer)
+                            .await?
+                            .parse()
+                            .map_err(|_| {
+                                Error::Other(format!("ns is not an integer in {tag:?}"))
+                            })?,
+                    );
+                }
+                b"id" => {
+                    id = Some(parse_string("id", tag.attributes(), reader, buffer).await?);
+                }
+                b"revision" => {
+                    revision = Some(parse_revision(tag.attributes(), reader, buffer).await?);
+                }
+                _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
+            },
+            RelevantEvent::End(tag) => {
+                return if tag.name() == b"page" {
+                    Ok(Page {
+                        title: if let Some(title) = title {
+                            title
+                        } else {
+                            return Err(Error::Other(format!("Missing title in page")));
+                        },
+                        namespace: if let Some(namespace) = namespace {
+                            namespace
+                        } else {
+                            return Err(Error::Other(format!("Missing namespace in page")));
+                        },
+                        id: if let Some(id) = id {
+                            id
+                        } else {
+                            return Err(Error::Other(format!("Missing id in page")));
+                        },
+                        revision: if let Some(revision) = revision {
+                            revision
+                        } else {
+                            return Err(Error::Other(format!("Missing revision in page")));
+                        },
+                    })
+                } else {
+                    Err(Error::Other(format!(
+                        "Found unexpected closing tag {tag:?}"
+                    )))
+                };
+            }
+            RelevantEvent::Empty(tag) => {
+                debug!("{tag:?}")
+            }
+            RelevantEvent::Text(text) => {
+                debug!("{text:?}")
+            }
+            RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct Revision {
+    id: String,
+}
+
+async fn parse_revision<'attributes, InputStream: BufRead>(
+    mut attributes: Attributes<'attributes>,
+    reader: &mut Reader<InputStream>,
+    buffer: &mut Vec<u8>,
+) -> Result<Revision> {
+    if let Some(attribute) = attributes.next() {
+        return Err(Error::Other(format!("Unexpected attribute {attribute:?}")));
+    }
+
+    let mut id = None;
+
+    loop {
+        match read_relevant_event(reader, buffer)? {
+            RelevantEvent::Start(tag) => match tag.name() {
+                b"id" => {
+                    id = Some(parse_string("id", tag.attributes(), reader, buffer).await?);
+                }
+                _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
+            },
+            RelevantEvent::End(tag) => {
+                return if tag.name() == b"revision" {
+                    Ok(Revision {
+                        id: if let Some(id) = id {
+                            id
+                        } else {
+                            return Err(Error::Other(format!("Missing id in revision")));
+                        },
+                    })
+                } else {
+                    Err(Error::Other(format!(
+                        "Found unexpected closing tag {tag:?}"
+                    )))
+                };
+            }
+            RelevantEvent::Empty(tag) => {
+                debug!("{tag:?}")
+            }
+            RelevantEvent::Text(text) => {
+                debug!("{text:?}")
+            }
+            RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
+        }
+    }
+}
+
 async fn parse_string<'attributes, InputStream: BufRead>(
     name: impl AsRef<[u8]>,
     mut attributes: Attributes<'attributes>,
@@ -436,12 +577,4 @@ async fn parse_string<'attributes, InputStream: BufRead>(
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
     }
-}
-
-async fn parse_page<'attributes, InputStream: BufRead>(
-    mut attributes: Attributes<'attributes>,
-    reader: &mut Reader<InputStream>,
-    buffer: &mut Vec<u8>,
-) -> Result<()> {
-    todo!("parse_page")
 }
