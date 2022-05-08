@@ -52,6 +52,7 @@ impl<R: Read + Unpin> AsyncRead for TokioReadAdapter<R> {
 pub async fn parse_dump_file(
     input_file: impl AsRef<Path>,
     output_file: impl AsRef<Path>,
+    output_pretty: bool,
 ) -> Result<()> {
     let input_file = input_file.as_ref();
     let output_file = output_file.as_ref();
@@ -95,6 +96,7 @@ pub async fn parse_dump_file(
                 )
             }),
             output_stream,
+            output_pretty,
         )
         .await?;
     } else if input_file
@@ -117,6 +119,7 @@ pub async fn parse_dump_file(
                 )
             }),
             output_stream,
+            output_pretty,
         )
         .await?;
     } else {
@@ -132,6 +135,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
     input_stream: InputStream,
     input_progress: Box<dyn Fn(&InputStream) -> (Result<u64>, u64)>,
     mut output_stream: impl Write,
+    output_pretty: bool,
 ) -> Result<()> {
     let mut reader = Reader::from_reader(input_stream);
     let mut buffer = Vec::new();
@@ -173,13 +177,21 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                                     "{} ({} {})",
                                     siteinfo.sitename, siteinfo.dbname, siteinfo.generator
                                 );
-                                serde_json::to_writer(&mut output_stream, &siteinfo)?;
+                                if output_pretty {
+                                    serde_json::to_writer_pretty(&mut output_stream, &siteinfo)?;
+                                } else {
+                                    serde_json::to_writer(&mut output_stream, &siteinfo)?;
+                                }
                             }
                             "page" => {
                                 let page =
                                     parse_page(tag.attributes(), &mut reader, &mut buffer).await?;
                                 trace!("{page:?}");
-                                serde_json::to_writer(&mut output_stream, &page)?;
+                                if output_pretty {
+                                    serde_json::to_writer_pretty(&mut output_stream, &page)?;
+                                } else {
+                                    serde_json::to_writer(&mut output_stream, &page)?;
+                                }
                             }
                             _ => {
                                 return Err(Error::Other(format!(
