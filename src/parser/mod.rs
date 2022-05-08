@@ -711,7 +711,7 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
                     if let (Some(username), Some(id), None) = (&username, &id, &ip) {
                         Ok(Contributor::User {
                             username: username.clone(),
-                            id: id.clone(),
+                            id: *id,
                         })
                     } else if let (None, None, Some(ip)) = (&username, &id, &ip) {
                         Ok(Contributor::Anonymous { ip: ip.clone() })
@@ -747,14 +747,14 @@ pub enum XmlSpace {
 }
 
 async fn parse_text<'attributes, InputStream: BufRead>(
-    mut attributes: Attributes<'attributes>,
+    attributes: Attributes<'attributes>,
     reader: &mut Reader<InputStream>,
     buffer: &mut Vec<u8>,
 ) -> Result<Text> {
     let mut bytes: Option<usize> = None;
     let mut xml_space = None;
 
-    while let Some(attribute) = attributes.next() {
+    for attribute in attributes {
         let attribute = attribute?;
         match attribute.key {
             b"bytes" => {
@@ -788,9 +788,9 @@ async fn parse_text<'attributes, InputStream: BufRead>(
 
     loop {
         match read_relevant_event(reader, buffer)? {
-            RelevantEvent::Start(tag) => match tag.name() {
-                _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
-            },
+            RelevantEvent::Start(tag) => {
+                return Err(Error::Other(format!("Found unexpected tag {tag:?}")));
+            }
             RelevantEvent::End(tag) => {
                 return if tag.name() == b"text" {
                     Ok(Text {
