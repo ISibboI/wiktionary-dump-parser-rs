@@ -7,7 +7,6 @@ use quick_xml::events::attributes::Attributes;
 use quick_xml::Reader;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashSet;
 use std::io::{BufRead, Read, Seek, Write};
 use std::path::Path;
 use std::pin::Pin;
@@ -126,7 +125,7 @@ pub async fn parse_dump_file(
         )));
     }
 
-    todo!()
+    Ok(())
 }
 
 async fn parse_dump_file_with_streams<InputStream: BufRead>(
@@ -138,8 +137,6 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
     let mut buffer = Vec::new();
     let mut last_progress_log = Instant::now();
     let mut tag_stack = Vec::new();
-    let mut tag_names = HashSet::new();
-    let toplevel = 1;
 
     loop {
         let current_time = Instant::now();
@@ -156,77 +153,71 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
 
         let level = tag_stack.len();
         match read_relevant_event(&mut reader, &mut buffer) {
-            Ok(event) => {
-                match event {
-                    // level 1 tags: "siteinfo", "page"
-                    RelevantEvent::Start(tag) => {
-                        let tag_name = String::from_utf8(tag.name().to_vec())?;
-                        if level == 0 {
-                            if tag_name != "mediawiki" {
+            Ok(event) => match event {
+                RelevantEvent::Start(tag) => {
+                    let tag_name = String::from_utf8(tag.name().to_vec())?;
+                    if level == 0 {
+                        if tag_name != "mediawiki" {
+                            return Err(Error::Other(format!(
+                                "Found unexpected toplevel tag {tag:?}"
+                            )));
+                        }
+                        tag_stack.push(tag_name);
+                    } else if level == 1 {
+                        match tag_name.as_str() {
+                            "siteinfo" => {
+                                let siteinfo =
+                                    parse_siteinfo(tag.attributes(), &mut reader, &mut buffer)
+                                        .await?;
+                                info!(
+                                    "{} ({} {})",
+                                    siteinfo.sitename, siteinfo.dbname, siteinfo.generator
+                                );
+                                serde_json::to_writer(&mut output_stream, &siteinfo)?;
+                            }
+                            "page" => {
+                                let page =
+                                    parse_page(tag.attributes(), &mut reader, &mut buffer).await?;
+                                trace!("{page:?}");
+                                serde_json::to_writer(&mut output_stream, &page)?;
+                            }
+                            _ => {
                                 return Err(Error::Other(format!(
-                                    "Found unexpected toplevel tag {tag:?}"
-                                )));
+                                    "Found unexpected level 1 tag {tag:?}"
+                                )))
                             }
-                            tag_names.insert(tag_name.clone());
-                            tag_stack.push(tag_name);
-                        } else if level == 1 {
-                            match tag_name.as_str() {
-                                "siteinfo" => {
-                                    let siteinfo =
-                                        parse_siteinfo(tag.attributes(), &mut reader, &mut buffer)
-                                            .await?;
-                                    info!("{siteinfo:?}");
-                                    serde_json::to_writer(&mut output_stream, &siteinfo)?;
-                                }
-                                "page" => {
-                                    let page =
-                                        parse_page(tag.attributes(), &mut reader, &mut buffer)
-                                            .await?;
-                                    trace!("{page:?}");
-                                    serde_json::to_writer(&mut output_stream, &page)?;
-                                }
-                                _ => {
-                                    return Err(Error::Other(format!(
-                                        "Found unexpected level 1 tag {tag:?}"
-                                    )))
-                                }
-                            }
-                        }
-                    }
-                    RelevantEvent::End(tag) => {
-                        let tag_name = String::from_utf8(tag.name().to_vec())?;
-                        let stacked_tag = tag_stack.pop().ok_or_else(|| {
-                            Error::Other(format!("Unexpected closing tag {tag:?}"))
-                        })?;
-                        if tag_name != stacked_tag {
-                            return Err(Error::Other(format!("Unexpected closing tag {tag:?}")));
-                        }
-                    }
-                    RelevantEvent::Empty(tag) => {
-                        if level <= toplevel {
-                            debug!("Found level {level} empty tag {tag:?}");
-                            tag_names.insert(String::from_utf8(tag.name().to_vec())?);
-                        }
-                    }
-                    RelevantEvent::Text(text) => {
-                        return Err(Error::Other(format!("Unexpected text {text:?}")));
-                    }
-                    RelevantEvent::Eof => {
-                        if level > 0 {
-                            return Err(Error::Other(format!("Unexpected eof")));
-                        } else {
-                            break;
                         }
                     }
                 }
-            }
+                RelevantEvent::End(tag) => {
+                    let tag_name = String::from_utf8(tag.name().to_vec())?;
+                    let stacked_tag = tag_stack
+                        .pop()
+                        .ok_or_else(|| Error::Other(format!("Unexpected closing tag {tag:?}")))?;
+                    if tag_name != stacked_tag {
+                        return Err(Error::Other(format!("Unexpected closing tag {tag:?}")));
+                    }
+                }
+                RelevantEvent::Empty(tag) => {
+                    return Err(Error::Other(format!("Unexpected empty tag {tag:?}")));
+                }
+                RelevantEvent::Text(text) => {
+                    return Err(Error::Other(format!("Unexpected text {text:?}")));
+                }
+                RelevantEvent::Eof => {
+                    if level > 0 {
+                        return Err(Error::Other(format!("Unexpected eof")));
+                    } else {
+                        break;
+                    }
+                }
+            },
             Err(error) => return Err(error),
         }
     }
 
-    info!("Found tag names {tag_names:?}");
-
-    todo!()
+    info!("Successfully parsed dump file");
+    Ok(())
 }
 
 async fn parse_siteinfo<'attributes, InputStream: BufRead>(
@@ -311,10 +302,10 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
                 };
             }
             RelevantEvent::Empty(tag) => {
-                debug!("{tag:?}")
+                warn!("{tag:?}")
             }
             RelevantEvent::Text(text) => {
-                debug!("{text:?}")
+                warn!("{text:?}")
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
@@ -384,7 +375,10 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
                 };
             }
             RelevantEvent::Empty(tag) => {
-                debug!("{tag:?}")
+                match tag.name() {
+                    b"namespace" => { /* ignore nameless namespace */ }
+                    _ => warn!("{tag:?}"),
+                }
             }
             RelevantEvent::Text(text) => {
                 if let Some(current_namespace_tag) = current_namespace_tag {
@@ -412,6 +406,7 @@ pub struct Page {
     namespace: i64,
     id: i64,
     revision: Revision,
+    redirect: Option<String>,
 }
 
 async fn parse_page<'attributes, InputStream: BufRead>(
@@ -427,6 +422,7 @@ async fn parse_page<'attributes, InputStream: BufRead>(
     let mut namespace = None;
     let mut id = None;
     let mut revision = None;
+    let mut redirect = None;
 
     loop {
         match read_relevant_event(reader, buffer)? {
@@ -482,6 +478,7 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                         } else {
                             return Err(Error::Other(format!("Missing revision in page")));
                         },
+                        redirect,
                     })
                 } else {
                     Err(Error::Other(format!(
@@ -489,11 +486,22 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                     )))
                 };
             }
-            RelevantEvent::Empty(tag) => {
-                debug!("{tag:?}")
-            }
+            RelevantEvent::Empty(tag) => match tag.name() {
+                b"redirect" => {
+                    for attribute in tag.attributes() {
+                        let attribute = attribute?;
+                        match attribute.key {
+                            b"title" => {
+                                redirect = Some(String::from_utf8(attribute.value.to_vec())?);
+                            }
+                            _ => warn!("{tag:?} {attribute:?}"),
+                        }
+                    }
+                }
+                _ => warn!("{tag:?}"),
+            },
             RelevantEvent::Text(text) => {
-                debug!("{text:?}")
+                warn!("{text:?}")
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
@@ -505,12 +513,13 @@ pub struct Revision {
     id: i64,
     parentid: Option<i64>,
     timestamp: String,
-    contributor: Contributor,
+    contributor: Option<Contributor>,
     comment: Option<String>,
     model: String,
     format: String,
     text: Option<Text>,
     sha1: String,
+    minor: bool,
 }
 
 async fn parse_revision<'attributes, InputStream: BufRead>(
@@ -531,6 +540,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
     let mut format = None;
     let mut text = None;
     let mut sha1 = None;
+    let mut minor = false;
 
     loop {
         match read_relevant_event(reader, buffer)? {
@@ -583,7 +593,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
             RelevantEvent::End(tag) => {
                 return if tag.name() == b"revision" {
                     if text.is_none() {
-                        warn!("No text for page with id {id:?} and comment {comment:?}");
+                        debug!("No text for revision with id {id:?} and comment {comment:?}");
                     }
 
                     Ok(Revision {
@@ -598,11 +608,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                         } else {
                             return Err(Error::Other(format!("Missing timestamp in revision")));
                         },
-                        contributor: if let Some(contributor) = contributor {
-                            contributor
-                        } else {
-                            return Err(Error::Other(format!("Missing contributor in revision")));
-                        },
+                        contributor,
                         comment,
                         model: if let Some(model) = model {
                             model
@@ -620,6 +626,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                         } else {
                             return Err(Error::Other(format!("Missing sha1 in revision")));
                         },
+                        minor,
                     })
                 } else {
                     Err(Error::Other(format!(
@@ -629,12 +636,17 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
             }
             RelevantEvent::Empty(tag) => {
                 match tag.name() {
-                    b"minor" => { /* ignore */ }
-                    _ => debug!("{tag:?}"),
+                    b"minor" => {
+                        minor = true;
+                    }
+                    b"comment" => { /* ignore empty comment */ }
+                    b"text" => { /* ignore empty text */ }
+                    b"contributor" => { /* ignore empty contributor */ }
+                    _ => warn!("{tag:?}"),
                 }
             }
             RelevantEvent::Text(text) => {
-                debug!("{text:?}")
+                warn!("{text:?}")
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
@@ -701,10 +713,10 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
                 };
             }
             RelevantEvent::Empty(tag) => {
-                debug!("{tag:?}")
+                warn!("{tag:?}")
             }
             RelevantEvent::Text(text) => {
-                debug!("{text:?}")
+                warn!("{text:?}")
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }
@@ -788,7 +800,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                 };
             }
             RelevantEvent::Empty(tag) => {
-                debug!("{tag:?}")
+                warn!("{tag:?}")
             }
             RelevantEvent::Text(raw_text) => {
                 if let Some(bytes) = bytes {
@@ -832,7 +844,7 @@ async fn parse_string<'attributes, InputStream: BufRead>(
                 };
             }
             RelevantEvent::Empty(tag) => {
-                debug!("{tag:?}")
+                warn!("{tag:?}")
             }
             RelevantEvent::Text(text) => value = text,
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
