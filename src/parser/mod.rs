@@ -81,7 +81,7 @@ pub async fn parse_dump_file(
         );
         let output_stream = std::io::BufWriter::new(std::fs::File::create(output_file)?);
 
-        // File is compressed, to input size is not accurate
+        // File is compressed, so input size is not accurate
         parse_dump_file_with_streams(
             input_stream,
             Box::new(move |input_stream| {

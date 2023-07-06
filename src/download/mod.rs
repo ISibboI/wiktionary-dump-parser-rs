@@ -143,10 +143,10 @@ pub async fn download_file_with_progress_log(
     drop(input_stream);
 
     if let Some(md5) = md5 {
-        debug!("Verifying md5 checksum");
+        info!("Verifying md5 checksum");
         let md5_digest = format!("{:x}", md5_digest.finalize());
         if md5_digest == md5 {
-            debug!("Md5 checksum matches");
+            info!("Md5 checksum matches");
         } else {
             return Err(Error::Other(format!(
                 "Md5 checksum is '{md5_digest}', but should be '{md5}'"
@@ -157,10 +157,10 @@ pub async fn download_file_with_progress_log(
     }
 
     if let Some(sha1) = sha1 {
-        debug!("Verifying sha1 checksum");
+        info!("Verifying sha1 checksum");
         let sha1_digest = format!("{:x}", sha1_digest.finalize());
         if sha1_digest == sha1 {
-            debug!("Sha1 checksum matches");
+            info!("Sha1 checksum matches");
         } else {
             return Err(Error::Other(format!(
                 "Sha1 checksum is '{sha1_digest}', but should be '{sha1}'"
