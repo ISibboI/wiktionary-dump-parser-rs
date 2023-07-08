@@ -18,32 +18,30 @@ pub enum RelevantEvent<'a> {
     Eof,
 }
 
-pub fn read_relevant_event<'reader, 'buffer, 'result>(
-    reader: &'reader mut Reader<impl BufRead>,
-    buffer: &'buffer mut Vec<u8>,
-) -> Result<RelevantEvent<'result>> {
+pub fn read_relevant_event(
+    reader: &mut Reader<impl BufRead>,
+    buffer: &mut Vec<u8>,
+) -> Result<RelevantEvent<'static>> {
     let relevant_event;
 
     loop {
-        match reader.read_event(buffer)? {
+        match reader.read_event_into(buffer)?.into_owned() {
             Event::Start(tag) => {
-                relevant_event =
-                    RelevantEvent::Start(BytesStart::owned(tag.to_vec(), tag.name().len()));
+                relevant_event = RelevantEvent::Start(tag);
                 break;
             }
             Event::End(tag) => {
-                relevant_event = RelevantEvent::End(BytesEnd::owned(tag.to_vec()));
+                relevant_event = RelevantEvent::End(tag);
                 break;
             }
             Event::Empty(tag) => {
-                relevant_event =
-                    RelevantEvent::Empty(BytesStart::owned(tag.to_vec(), tag.name().len()));
+                relevant_event = RelevantEvent::Empty(tag);
                 break;
             }
             Event::Text(text) => {
                 if text.iter().any(|byte| !byte.is_ascii_whitespace()) {
-                    let unescaped = text.unescaped()?.to_vec();
-                    relevant_event = RelevantEvent::Text(String::from_utf8(unescaped)?);
+                    let unescaped = text.unescape()?;
+                    relevant_event = RelevantEvent::Text(unescaped.to_string());
                     break;
                 }
             }

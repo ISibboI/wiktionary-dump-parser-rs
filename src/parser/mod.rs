@@ -4,6 +4,7 @@ use crate::Error;
 use bzip2::bufread::MultiBzDecoder;
 use log::{debug, info, trace, warn};
 use quick_xml::events::attributes::Attributes;
+use quick_xml::name::QName;
 use quick_xml::Reader;
 use serde::Deserialize;
 use serde::Serialize;
@@ -131,6 +132,7 @@ pub async fn parse_dump_file(
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 async fn parse_dump_file_with_streams<InputStream: BufRead>(
     input_stream: InputStream,
     input_progress: Box<dyn Fn(&InputStream) -> (Result<u64>, u64)>,
@@ -147,7 +149,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
         if current_time - last_progress_log >= Duration::from_secs(10) {
             last_progress_log = current_time;
 
-            let (current, input_size) = input_progress(reader.underlying_reader_ref());
+            let (current, input_size) = input_progress(reader.get_ref());
             let current = current?;
             let current_mib = current / (1024 * 1024);
             let input_size_mib = input_size / (1024 * 1024);
@@ -159,7 +161,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
         match read_relevant_event(&mut reader, &mut buffer) {
             Ok(event) => match event {
                 RelevantEvent::Start(tag) => {
-                    let tag_name = String::from_utf8(tag.name().to_vec())?;
+                    let tag_name = String::from_utf8(tag.name().into_inner().to_vec())?;
                     if level == 0 {
                         if tag_name != "mediawiki" {
                             return Err(Error::Other(format!(
@@ -202,7 +204,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                     }
                 }
                 RelevantEvent::End(tag) => {
-                    let tag_name = String::from_utf8(tag.name().to_vec())?;
+                    let tag_name = String::from_utf8(tag.name().into_inner().to_vec())?;
                     let stacked_tag = tag_stack
                         .pop()
                         .ok_or_else(|| Error::Other(format!("Unexpected closing tag {tag:?}")))?;
@@ -250,7 +252,7 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
 
     loop {
         match read_relevant_event(reader, buffer)? {
-            RelevantEvent::Start(tag) => match tag.name() {
+            RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"sitename" => {
                     sitename =
                         Some(parse_string("sitename", tag.attributes(), reader, buffer).await?);
@@ -274,7 +276,7 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
             },
             RelevantEvent::End(tag) => {
-                return if tag.name() == b"siteinfo" {
+                return if tag.name() == QName(b"siteinfo") {
                     Ok(Siteinfo {
                         sitename: if let Some(sitename) = sitename {
                             sitename
@@ -343,7 +345,7 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
     loop {
         match read_relevant_event(reader, buffer)? {
             RelevantEvent::Start(tag) => {
-                if tag.name() == b"namespace" {
+                if tag.name() == QName(b"namespace") {
                     if current_namespace_tag.is_some() {
                         return Err(Error::Other(format!("Found nested namespace tag {tag:?}")));
                     }
@@ -372,9 +374,9 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
                 }
             }
             RelevantEvent::End(tag) => {
-                if tag.name() == b"namespaces" {
+                if tag.name() == QName(b"namespaces") {
                     return Ok(namespaces);
-                } else if tag.name() == b"namespace" {
+                } else if tag.name() == QName(b"namespace") {
                     if current_namespace_tag.is_some() {
                         return Err(Error::Other(format!(
                             "Found namespace tag without text {tag:?}"
@@ -387,7 +389,7 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
                 };
             }
             RelevantEvent::Empty(tag) => {
-                match tag.name() {
+                match tag.name().into_inner() {
                     b"namespace" => { /* ignore nameless namespace */ }
                     _ => warn!("{tag:?}"),
                 }
@@ -438,7 +440,7 @@ async fn parse_page<'attributes, InputStream: BufRead>(
 
     loop {
         match read_relevant_event(reader, buffer)? {
-            RelevantEvent::Start(tag) => match tag.name() {
+            RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"title" => {
                     title = Some(parse_string("title", tag.attributes(), reader, buffer).await?);
                 }
@@ -468,7 +470,7 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
             },
             RelevantEvent::End(tag) => {
-                return if tag.name() == b"page" {
+                return if tag.name() == QName(b"page") {
                     Ok(Page {
                         title: if let Some(title) = title {
                             title
@@ -498,12 +500,12 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                     )))
                 };
             }
-            RelevantEvent::Empty(tag) => match tag.name() {
+            RelevantEvent::Empty(tag) => match tag.name().into_inner() {
                 b"redirect" => {
                     for attribute in tag.attributes() {
                         let attribute = attribute?;
                         match attribute.key {
-                            b"title" => {
+                            QName(b"title") => {
                                 redirect = Some(String::from_utf8(attribute.value.to_vec())?);
                             }
                             _ => warn!("{tag:?} {attribute:?}"),
@@ -556,7 +558,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
 
     loop {
         match read_relevant_event(reader, buffer)? {
-            RelevantEvent::Start(tag) => match tag.name() {
+            RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"id" => {
                     id = Some(
                         parse_string("id", tag.attributes(), reader, buffer)
@@ -603,7 +605,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
             },
             RelevantEvent::End(tag) => {
-                return if tag.name() == b"revision" {
+                return if tag.name() == QName(b"revision") {
                     if text.is_none() {
                         debug!("No text for revision with id {id:?} and comment {comment:?}");
                     }
@@ -647,7 +649,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                 };
             }
             RelevantEvent::Empty(tag) => {
-                match tag.name() {
+                match tag.name().into_inner() {
                     b"minor" => {
                         minor = true;
                     }
@@ -686,7 +688,7 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
 
     loop {
         match read_relevant_event(reader, buffer)? {
-            RelevantEvent::Start(tag) => match tag.name() {
+            RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"username" => {
                     username =
                         Some(parse_string("username", tag.attributes(), reader, buffer).await?);
@@ -707,7 +709,7 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
             },
             RelevantEvent::End(tag) => {
-                return if tag.name() == b"contributor" {
+                return if tag.name() == QName(b"contributor") {
                     if let (Some(username), Some(id), None) = (&username, &id, &ip) {
                         Ok(Contributor::User {
                             username: username.clone(),
@@ -756,7 +758,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
 
     for attribute in attributes {
         let attribute = attribute?;
-        match attribute.key {
+        match attribute.key.into_inner() {
             b"bytes" => {
                 bytes = Some(
                     String::from_utf8(attribute.value.to_vec())?
@@ -792,7 +794,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                 return Err(Error::Other(format!("Found unexpected tag {tag:?}")));
             }
             RelevantEvent::End(tag) => {
-                return if tag.name() == b"text" {
+                return if tag.name() == QName(b"text") {
                     Ok(Text {
                         xml_space: if let Some(xml_space) = xml_space {
                             xml_space
@@ -847,7 +849,7 @@ async fn parse_string<'attributes, InputStream: BufRead>(
                 return Err(Error::Other(format!("Found unexpected tag {tag:?}")));
             }
             RelevantEvent::End(tag) => {
-                return if tag.name() == name {
+                return if tag.name() == QName(name) {
                     Ok(value)
                 } else {
                     Err(Error::Other(format!(
