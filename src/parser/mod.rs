@@ -601,15 +601,8 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                     format = Some(parse_string("format", tag.attributes(), reader, buffer).await?);
                 }
                 b"text" => {
-                    text = Some(
-                        parse_text(
-                            tag.attributes(),
-                            title.as_deref(),
-                            reader,
-                            buffer,
-                        )
-                        .await?,
-                    );
+                    text =
+                        Some(parse_text(tag.attributes(), title.as_deref(), reader, buffer).await?);
                 }
                 b"sha1" => {
                     sha1 = Some(parse_string("sha1", tag.attributes(), reader, buffer).await?);
@@ -846,7 +839,9 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                 )
                 .map_err(|error| Error::WikitextParserError {
                     error,
-                    page: title.map(ToString::to_string).unwrap_or_default(),
+                    page_name: title.map(ToString::to_string).unwrap_or_default(),
+                    page_content_json: serde_json::to_string(&raw_text)
+                        .expect("It should always be possible to convert a Rust string to JSON."),
                 })?;
                 text = Some(parsed_text);
             }

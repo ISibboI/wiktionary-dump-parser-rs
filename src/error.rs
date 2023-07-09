@@ -13,8 +13,12 @@ pub enum Error {
     QuickXmlError(quick_xml::Error),
     QuickXmlAttributeError(quick_xml::events::attributes::AttrError),
     WikitextParserError {
+        /// The error returned by the parser.
         error: wikitext_parser::ParserError,
-        page: String,
+        /// The name of the page.
+        page_name: String,
+        /// The page content causing the error formatted as json.
+        page_content_json: String,
     },
 
     /// The given english language name is unknown.
