@@ -466,7 +466,9 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                     );
                 }
                 b"revision" => {
-                    revision = Some(parse_revision(tag.attributes(), reader, buffer).await?);
+                    revision = Some(
+                        parse_revision(tag.attributes(), title.clone(), reader, buffer).await?,
+                    );
                 }
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
             },
@@ -539,6 +541,7 @@ pub struct Revision {
 
 async fn parse_revision<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
+    title: Option<String>,
     reader: &mut Reader<InputStream>,
     buffer: &mut Vec<u8>,
 ) -> Result<Revision> {
@@ -598,7 +601,15 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                     format = Some(parse_string("format", tag.attributes(), reader, buffer).await?);
                 }
                 b"text" => {
-                    text = Some(parse_text(tag.attributes(), reader, buffer).await?);
+                    text = Some(
+                        parse_text(
+                            tag.attributes(),
+                            title.as_deref(),
+                            reader,
+                            buffer,
+                        )
+                        .await?,
+                    );
                 }
                 b"sha1" => {
                     sha1 = Some(parse_string("sha1", tag.attributes(), reader, buffer).await?);
@@ -751,6 +762,7 @@ pub enum XmlSpace {
 
 async fn parse_text<'attributes, InputStream: BufRead>(
     attributes: Attributes<'attributes>,
+    title: Option<&str>,
     reader: &mut Reader<InputStream>,
     buffer: &mut Vec<u8>,
 ) -> Result<Text> {
@@ -825,7 +837,17 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                     }
                 }
                 assert!(text.is_none());
-                let parsed_text = parse_wikitext(&raw_text, String::new())?;
+                if title.is_none() {
+                    warn!("Page content is parsed before its title.");
+                }
+                let parsed_text = parse_wikitext(
+                    &raw_text,
+                    title.map(ToString::to_string).unwrap_or_default(),
+                )
+                .map_err(|error| Error::WikitextParserError {
+                    error,
+                    page: title.map(ToString::to_string).unwrap_or_default(),
+                })?;
                 text = Some(parsed_text);
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
