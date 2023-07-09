@@ -12,6 +12,7 @@ pub enum Error {
     FromUtf8Error(std::string::FromUtf8Error),
     QuickXmlError(quick_xml::Error),
     QuickXmlAttributeError(quick_xml::events::attributes::AttrError),
+    WikitextParserError(wikitext_parser::ParserError),
 
     /// The given english language name is unknown.
     UnknownEnglishLanguageName(String),
@@ -68,5 +69,11 @@ impl From<quick_xml::Error> for Error {
 impl From<quick_xml::events::attributes::AttrError> for Error {
     fn from(error: quick_xml::events::attributes::AttrError) -> Self {
         Self::QuickXmlAttributeError(error)
+    }
+}
+
+impl From<wikitext_parser::ParserError> for Error {
+    fn from(error: wikitext_parser::ParserError) -> Self {
+        Self::WikitextParserError(error)
     }
 }

@@ -15,6 +15,7 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::time::Duration;
 use tokio::time::Instant;
+use wikitext_parser::{parse_wikitext, Wikitext};
 
 mod xml;
 
@@ -740,7 +741,7 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Text {
     xml_space: XmlSpace,
-    text: String,
+    text: Wikitext,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -823,7 +824,9 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                         warn!("Text length mismatch, attribute states {bytes}, but we got {raw_text_len}");
                     }
                 }
-                text = Some(raw_text);
+                assert!(text.is_none());
+                let parsed_text = parse_wikitext(&raw_text, String::new())?;
+                text = Some(parsed_text);
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),
         }

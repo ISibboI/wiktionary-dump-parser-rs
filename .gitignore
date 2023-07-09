@@ -1,3 +1,4 @@
 /target
 /data
 *.xml.bz2
+*.json

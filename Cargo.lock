@@ -1506,6 +1506,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wikitext-parser"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7426ff7d71f07d76198b4ff77a54b7f2e2e1355187987d49752949b56936c971"
+dependencies = [
+ "lazy_static",
+ "log",
+ "regex",
+ "serde",
+]
+
+[[package]]
 name = "wiktionary-dump-parser"
 version = "0.1.0"
 dependencies = [
@@ -1528,6 +1540,7 @@ dependencies = [
  "simplelog",
  "tokio",
  "url",
+ "wikitext-parser",
 ]
 
 [[package]]
