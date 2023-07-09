@@ -2,3 +2,4 @@
 /data
 *.xml.bz2
 *.json
+*.xml
