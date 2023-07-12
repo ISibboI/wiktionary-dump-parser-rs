@@ -14,7 +14,7 @@ pub enum Error {
     QuickXmlAttributeError(quick_xml::events::attributes::AttrError),
     WikitextParserError {
         /// The error returned by the parser.
-        error: wikitext_parser::ParserError,
+        error: Box<wikitext_parser::ParserError>,
         /// The name of the page.
         page_name: String,
         /// The page content causing the error formatted as json.

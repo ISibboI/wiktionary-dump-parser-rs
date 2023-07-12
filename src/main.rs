@@ -43,6 +43,8 @@ enum CliCommand {
         #[clap(long)]
         output_file: PathBuf,
         #[clap(long)]
+        error_log: PathBuf,
+        #[clap(long)]
         output_pretty: bool,
     },
 }
@@ -85,10 +87,11 @@ async fn main() -> Result<()> {
         CliCommand::ParseDumpFile {
             input_file,
             output_file,
+            error_log,
             output_pretty,
         } => {
             info!("Parsing dump file {input_file:?} into {output_file:?}");
-            parse_dump_file(&input_file, &output_file, output_pretty).await?;
+            parse_dump_file(&input_file, &output_file, &error_log, output_pretty).await?;
         }
     }
 

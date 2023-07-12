@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::parser::xml::{read_relevant_event, RelevantEvent};
 use crate::Error;
 use bzip2::bufread::MultiBzDecoder;
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use quick_xml::events::attributes::Attributes;
 use quick_xml::name::QName;
 use quick_xml::Reader;
@@ -54,6 +54,7 @@ impl<R: Read + Unpin> AsyncRead for TokioReadAdapter<R> {
 pub async fn parse_dump_file(
     input_file: impl AsRef<Path>,
     output_file: impl AsRef<Path>,
+    error_log: impl AsRef<Path>,
     output_pretty: bool,
 ) -> Result<()> {
     let input_file = input_file.as_ref();
@@ -82,6 +83,7 @@ pub async fn parse_dump_file(
             MultiBzDecoder::new(std::io::BufReader::new(input_file)),
         );
         let output_stream = std::io::BufWriter::new(std::fs::File::create(output_file)?);
+        let error_log = std::io::BufWriter::new(std::fs::File::create(error_log)?);
 
         // File is compressed, so input size is not accurate
         parse_dump_file_with_streams(
@@ -98,6 +100,7 @@ pub async fn parse_dump_file(
                 )
             }),
             output_stream,
+            error_log,
             output_pretty,
         )
         .await?;
@@ -112,6 +115,8 @@ pub async fn parse_dump_file(
         let input_size = input_file.metadata()?.len();
         let input_stream = std::io::BufReader::with_capacity(1024 * 1024, input_file);
         let output_stream = std::io::BufWriter::new(std::fs::File::create(output_file)?);
+        let error_log = std::io::BufWriter::new(std::fs::File::create(error_log)?);
+
         parse_dump_file_with_streams(
             input_stream,
             Box::new(move |input_stream| {
@@ -121,6 +126,7 @@ pub async fn parse_dump_file(
                 )
             }),
             output_stream,
+            error_log,
             output_pretty,
         )
         .await?;
@@ -138,6 +144,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
     input_stream: InputStream,
     input_progress: Box<dyn Fn(&InputStream) -> (Result<u64>, u64)>,
     mut output_stream: impl Write,
+    mut error_log: impl Write,
     output_pretty: bool,
 ) -> Result<()> {
     let mut reader = Reader::from_reader(input_stream);
@@ -187,8 +194,13 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                                 }
                             }
                             "page" => {
-                                let page =
-                                    parse_page(tag.attributes(), &mut reader, &mut buffer).await?;
+                                let page = parse_page(
+                                    tag.attributes(),
+                                    &mut reader,
+                                    &mut buffer,
+                                    &mut error_log,
+                                )
+                                .await?;
                                 trace!("{page:?}");
                                 if output_pretty {
                                     serde_json::to_writer_pretty(&mut output_stream, &page)?;
@@ -428,6 +440,7 @@ async fn parse_page<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
     reader: &mut Reader<InputStream>,
     buffer: &mut Vec<u8>,
+    error_log: &mut impl Write,
 ) -> Result<Page> {
     if let Some(attribute) = attributes.next() {
         return Err(Error::Other(format!("Unexpected attribute {attribute:?}")));
@@ -467,7 +480,8 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                 }
                 b"revision" => {
                     revision = Some(
-                        parse_revision(tag.attributes(), title.clone(), reader, buffer).await?,
+                        parse_revision(tag.attributes(), title.clone(), reader, buffer, error_log)
+                            .await?,
                     );
                 }
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
@@ -544,6 +558,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
     title: Option<String>,
     reader: &mut Reader<InputStream>,
     buffer: &mut Vec<u8>,
+    error_log: &mut impl Write,
 ) -> Result<Revision> {
     if let Some(attribute) = attributes.next() {
         return Err(Error::Other(format!("Unexpected attribute {attribute:?}")));
@@ -601,8 +616,16 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                     format = Some(parse_string("format", tag.attributes(), reader, buffer).await?);
                 }
                 b"text" => {
-                    text =
-                        Some(parse_text(tag.attributes(), title.as_deref(), reader, buffer).await?);
+                    text = Some(
+                        parse_text(
+                            tag.attributes(),
+                            title.as_deref(),
+                            reader,
+                            buffer,
+                            error_log,
+                        )
+                        .await?,
+                    );
                 }
                 b"sha1" => {
                     sha1 = Some(parse_string("sha1", tag.attributes(), reader, buffer).await?);
@@ -745,7 +768,7 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Text {
     xml_space: XmlSpace,
-    text: Wikitext,
+    text: std::result::Result<Wikitext, String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -758,6 +781,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
     title: Option<&str>,
     reader: &mut Reader<InputStream>,
     buffer: &mut Vec<u8>,
+    error_log: &mut impl Write,
 ) -> Result<Text> {
     let mut bytes: Option<usize> = None;
     let mut xml_space = None;
@@ -837,12 +861,20 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                     &raw_text,
                     title.map(ToString::to_string).unwrap_or_default(),
                 )
-                .map_err(|error| Error::WikitextParserError {
-                    error,
+                .map_err(|error| {
+                    let error =
+                        format!("{:?}", Error::WikitextParserError {
+                    error: Box::new(error),
                     page_name: title.map(ToString::to_string).unwrap_or_default(),
                     page_content_json: serde_json::to_string(&raw_text)
                         .expect("It should always be possible to convert a Rust string to JSON."),
-                })?;
+                });
+                    error_log
+                        .write_all(error.as_bytes())
+                        .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
+                    error!("Error parsing page {}", title.unwrap_or("<no title>"));
+                    error
+                });
                 text = Some(parsed_text);
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),

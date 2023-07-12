@@ -12,7 +12,7 @@ name = "wiktionary-dump-parser"
 [lib]
 
 [dependencies]
-wikitext-parser = {version = "0.1.5", features = ["serde"]}
+wikitext-parser = {version = "0.2.1", features = ["serde"]}
 
 tokio = {version = "1.17.0", features = ["full"]}
 reqwest = {version = "0.11.9", features = ["stream"]}
@@ -28,7 +28,7 @@ itertools = "0.10.3"
 lexiclean = "0.0.1"
 futures-util = "0.3.21"
 num-integer = "0.1.44"
-bzip2 = {version = "0.4.3", features = ["tokio"]}
+bzip2 = {version = "0.4.4", features = ["tokio"]}
 quick-xml = "0.29.0"
 digest = "0.10.3"
 md-5 = "0.10.1"
