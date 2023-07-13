@@ -857,23 +857,35 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                 if title.is_none() {
                     warn!("Page content is parsed before its title.");
                 }
+                debug!("Parsing '{}'", title.unwrap_or("<unknown>"));
+                /*if title == Some("Arunachal Pradesh") {
+                    println!("{}",serde_json::to_string(&raw_text)
+                        .expect("It should always be possible to convert a Rust string to JSON."));
+                }*/
                 let parsed_text = parse_wikitext(
                     &raw_text,
                     title.map(ToString::to_string).unwrap_or_default(),
                 )
                 .map_err(|error| {
-                    let error =
-                        format!("{:?}", Error::WikitextParserError {
-                    error: Box::new(error),
-                    page_name: title.map(ToString::to_string).unwrap_or_default(),
-                    page_content_json: serde_json::to_string(&raw_text)
-                        .expect("It should always be possible to convert a Rust string to JSON."),
-                });
-                    error_log
-                        .write_all(error.as_bytes())
-                        .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
-                    error!("Error parsing page {}", title.unwrap_or("<no title>"));
-                    error
+                    let ignore = raw_text.starts_with("{{inactive}}");
+
+                    let error = Error::WikitextParserError {
+                        error: Box::new(error),
+                        page_name: title.map(ToString::to_string).unwrap_or_default(),
+                        page_content_json: serde_json::to_string(&raw_text)
+                            .expect("It should always be possible to convert a Rust string to JSON."),
+                    };
+                    let error_str = format!("{:#?}", error);
+                    if ignore {
+                        writeln!(error_log, "Ignored error on page '{}'", title.unwrap_or("<no title>"))
+                            .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
+                        debug!("Ignored error on page '{}'", title.unwrap_or("<no title>"));
+                    } else {
+                        writeln!(error_log, "{}", error_str)
+                            .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
+                        error!("Error parsing page '{}'", title.unwrap_or("<no title>"));
+                    }
+                    error_str
                 });
                 text = Some(parsed_text);
             }
