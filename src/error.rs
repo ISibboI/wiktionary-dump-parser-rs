@@ -17,8 +17,8 @@ pub enum Error {
         error: Box<wikitext_parser::ParserError>,
         /// The name of the page.
         page_name: String,
-        /// The page content causing the error formatted as json.
-        page_content_json: String,
+        /// The page content causing the error.
+        page_content: String,
     },
 
     /// The given english language name is unknown.

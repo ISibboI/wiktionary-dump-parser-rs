@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::parser::xml::{read_relevant_event, RelevantEvent};
 use crate::Error;
 use bzip2::bufread::MultiBzDecoder;
-use log::{debug, error, info, trace, warn};
+use log::{debug, info, trace, warn};
 use quick_xml::events::attributes::Attributes;
 use quick_xml::name::QName;
 use quick_xml::Reader;
@@ -768,7 +768,7 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct Text {
     xml_space: XmlSpace,
-    text: std::result::Result<Wikitext, String>,
+    text: Wikitext,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -857,36 +857,31 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                 if title.is_none() {
                     warn!("Page content is parsed before its title.");
                 }
+
                 debug!("Parsing '{}'", title.unwrap_or("<unknown>"));
-                /*if title == Some("Arunachal Pradesh") {
-                    println!("{}",serde_json::to_string(&raw_text)
-                        .expect("It should always be possible to convert a Rust string to JSON."));
-                }*/
+                let mut errors = Vec::new();
                 let parsed_text = parse_wikitext(
                     &raw_text,
                     title.map(ToString::to_string).unwrap_or_default(),
-                )
-                .map_err(|error| {
-                    let ignore = raw_text.starts_with("{{inactive}}");
+                    |error| errors.push(error),
+                );
 
-                    let error = Error::WikitextParserError {
-                        error: Box::new(error),
-                        page_name: title.map(ToString::to_string).unwrap_or_default(),
-                        page_content_json: serde_json::to_string(&raw_text)
-                            .expect("It should always be possible to convert a Rust string to JSON."),
-                    };
-                    let error_str = format!("{:#?}", error);
-                    if ignore {
-                        writeln!(error_log, "Ignored error on page '{}'", title.unwrap_or("<no title>"))
-                            .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
-                        debug!("Ignored error on page '{}'", title.unwrap_or("<no title>"));
-                    } else {
-                        writeln!(error_log, "{}", error_str)
-                            .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
-                        error!("Error parsing page '{}'", title.unwrap_or("<no title>"));
-                    }
-                    error_str
-                });
+                let page_name = title.map(ToString::to_string).unwrap_or_default();
+
+                if !errors.is_empty() {
+                    debug!("Page '{page_name}' has {} errors", errors.len());
+                    writeln!(error_log, "Page: {page_name}")
+                        .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
+                }
+                for error in &errors {
+                    writeln!(error_log, "{error:#?}")
+                        .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
+                }
+                if !errors.is_empty() {
+                    writeln!(error_log, "\nContent: {raw_text}\n")
+                        .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
+                }
+
                 text = Some(parsed_text);
             }
             RelevantEvent::Eof => return Err(Error::Other(format!("Unexpected eof"))),

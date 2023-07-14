@@ -12,7 +12,7 @@ name = "wiktionary-dump-parser"
 [lib]
 
 [dependencies]
-wikitext-parser = {version = "0.2.9", features = ["serde"]}
+wikitext-parser = {path = "../wikitext-parser", version = "0.3.0", features = ["serde"]}
 
 tokio = {version = "1.17.0", features = ["full"]}
 reqwest = {version = "0.11.9", features = ["stream"]}
