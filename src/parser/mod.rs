@@ -898,12 +898,12 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                     |error| parser_errors.push(error),
                 );
 
+                let page_name = title.map(ToString::to_string).unwrap_or_default();
+
                 let mut word_errors = Vec::new();
-                wikitext_to_words(&parsed_text, &mut word_consumer, |error| {
+                wikitext_to_words(&page_name, &parsed_text, &mut word_consumer, |error| {
                     word_errors.push(error)
                 });
-
-                let page_name = title.map(ToString::to_string).unwrap_or_default();
 
                 if !parser_errors.is_empty() || !word_errors.is_empty() {
                     debug!("Page '{page_name}' has {} errors", parser_errors.len());

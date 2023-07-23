@@ -15,19 +15,19 @@ name = "wiktionary-dump-parser"
 [lib]
 
 [dependencies]
-wikitext-parser = {path = "../wikitext-parser", version = "0.3.0", features = ["serde"]}
+wikitext-parser = {path = "../wikitext-parser", version = "0.3.1", features = ["serde"]}
 
-tokio = {version = "1.17.0", features = ["full"]}
-reqwest = {version = "0.11.9", features = ["stream"]}
-clap = {version = "4.3.0", features = ["derive"]}
-log = "0.4.14"
+tokio = {version = "1.29.1", features = ["full"]}
+reqwest = {version = "0.11.18", features = ["stream"]}
+clap = {version = "4.3.19", features = ["derive"]}
+log = "0.4.19"
 simplelog = "0.12.1"
-regex = "1.5.4"
+regex = "1.9.1"
 lazy_static = "1.4.0"
 url = "2.2.2"
-serde = {version = "1.0.136", features = ["derive"]}
-serde_json = "1.0.79"
-itertools = "0.10.3"
+serde = {version = "1.0.174", features = ["derive"]}
+serde_json = "1.0.103"
+itertools = "0.11.0"
 lexiclean = "0.0.1"
 futures-util = "0.3.21"
 num-integer = "0.1.44"
