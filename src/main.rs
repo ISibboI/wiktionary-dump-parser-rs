@@ -91,7 +91,14 @@ async fn main() -> Result<()> {
             output_pretty,
         } => {
             info!("Parsing dump file {input_file:?} into {output_file:?}");
-            parse_dump_file(&input_file, &output_file, &error_log, output_pretty).await?;
+            parse_dump_file(
+                &input_file,
+                Some(&output_file),
+                |_| {},
+                &error_log,
+                output_pretty,
+            )
+            .await?;
         }
     }
 

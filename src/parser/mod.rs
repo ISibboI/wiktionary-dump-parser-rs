@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::parser::words::wikitext_to_words;
 use crate::parser::xml::{read_relevant_event, RelevantEvent};
 use crate::Error;
 use bzip2::bufread::MultiBzDecoder;
@@ -17,6 +18,9 @@ use tokio::time::Duration;
 use tokio::time::Instant;
 use wikitext_parser::{parse_wikitext, Wikitext};
 
+use self::words::Word;
+
+pub mod words;
 mod xml;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -53,7 +57,8 @@ impl<R: Read + Unpin> AsyncRead for TokioReadAdapter<R> {
 
 pub async fn parse_dump_file(
     input_file: impl AsRef<Path>,
-    output_file: impl AsRef<Path>,
+    output_file: Option<impl AsRef<Path>>,
+    mut word_consumer: impl FnMut(Word),
     error_log: impl AsRef<Path>,
     output_pretty: bool,
 ) -> Result<()> {
@@ -82,7 +87,11 @@ pub async fn parse_dump_file(
             1024 * 1024,
             MultiBzDecoder::new(std::io::BufReader::new(input_file)),
         );
-        let output_stream = std::io::BufWriter::new(std::fs::File::create(output_file)?);
+        let output_stream = if let Some(output_file) = output_file {
+            Some(std::io::BufWriter::new(std::fs::File::create(output_file)?))
+        } else {
+            None
+        };
         let error_log = std::io::BufWriter::new(std::fs::File::create(error_log)?);
 
         // File is compressed, so input size is not accurate
@@ -100,6 +109,7 @@ pub async fn parse_dump_file(
                 )
             }),
             output_stream,
+            &mut word_consumer,
             error_log,
             output_pretty,
         )
@@ -114,7 +124,11 @@ pub async fn parse_dump_file(
         let input_file = std::fs::File::open(input_file)?;
         let input_size = input_file.metadata()?.len();
         let input_stream = std::io::BufReader::with_capacity(1024 * 1024, input_file);
-        let output_stream = std::io::BufWriter::new(std::fs::File::create(output_file)?);
+        let output_stream = if let Some(output_file) = output_file {
+            Some(std::io::BufWriter::new(std::fs::File::create(output_file)?))
+        } else {
+            None
+        };
         let error_log = std::io::BufWriter::new(std::fs::File::create(error_log)?);
 
         parse_dump_file_with_streams(
@@ -126,6 +140,7 @@ pub async fn parse_dump_file(
                 )
             }),
             output_stream,
+            &mut word_consumer,
             error_log,
             output_pretty,
         )
@@ -143,7 +158,8 @@ pub async fn parse_dump_file(
 async fn parse_dump_file_with_streams<InputStream: BufRead>(
     input_stream: InputStream,
     input_progress: Box<dyn Fn(&InputStream) -> (Result<u64>, u64)>,
-    mut output_stream: impl Write,
+    mut output_stream: Option<impl Write>,
+    word_consumer: &mut impl FnMut(Word),
     mut error_log: impl Write,
     output_pretty: bool,
 ) -> Result<()> {
@@ -187,25 +203,30 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                                     "{} ({} {})",
                                     siteinfo.sitename, siteinfo.dbname, siteinfo.generator
                                 );
-                                if output_pretty {
-                                    serde_json::to_writer_pretty(&mut output_stream, &siteinfo)?;
-                                } else {
-                                    serde_json::to_writer(&mut output_stream, &siteinfo)?;
+                                if let Some(output_stream) = output_stream.as_mut() {
+                                    if output_pretty {
+                                        serde_json::to_writer_pretty(output_stream, &siteinfo)?;
+                                    } else {
+                                        serde_json::to_writer(output_stream, &siteinfo)?;
+                                    }
                                 }
                             }
                             "page" => {
                                 let page = parse_page(
                                     tag.attributes(),
                                     &mut reader,
+                                    word_consumer,
                                     &mut buffer,
                                     &mut error_log,
                                 )
                                 .await?;
                                 trace!("{page:?}");
-                                if output_pretty {
-                                    serde_json::to_writer_pretty(&mut output_stream, &page)?;
-                                } else {
-                                    serde_json::to_writer(&mut output_stream, &page)?;
+                                if let Some(output_stream) = output_stream.as_mut() {
+                                    if output_pretty {
+                                        serde_json::to_writer_pretty(output_stream, &page)?;
+                                    } else {
+                                        serde_json::to_writer(output_stream, &page)?;
+                                    }
                                 }
                             }
                             _ => {
@@ -439,6 +460,7 @@ pub struct Page {
 async fn parse_page<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
     reader: &mut Reader<InputStream>,
+    word_consumer: &mut impl FnMut(Word),
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Page> {
@@ -480,8 +502,15 @@ async fn parse_page<'attributes, InputStream: BufRead>(
                 }
                 b"revision" => {
                     revision = Some(
-                        parse_revision(tag.attributes(), title.clone(), reader, buffer, error_log)
-                            .await?,
+                        parse_revision(
+                            tag.attributes(),
+                            title.clone(),
+                            reader,
+                            word_consumer,
+                            buffer,
+                            error_log,
+                        )
+                        .await?,
                     );
                 }
                 _ => return Err(Error::Other(format!("Found unexpected tag {tag:?}"))),
@@ -557,6 +586,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
     title: Option<String>,
     reader: &mut Reader<InputStream>,
+    word_consumer: &mut impl FnMut(Word),
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Revision> {
@@ -621,6 +651,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
                             tag.attributes(),
                             title.as_deref(),
                             reader,
+                            word_consumer,
                             buffer,
                             error_log,
                         )
@@ -780,6 +811,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
     attributes: Attributes<'attributes>,
     title: Option<&str>,
     reader: &mut Reader<InputStream>,
+    mut word_consumer: &mut impl FnMut(Word),
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Text> {
@@ -859,25 +891,34 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                 }
 
                 debug!("Parsing '{}'", title.unwrap_or("<unknown>"));
-                let mut errors = Vec::new();
+                let mut parser_errors = Vec::new();
                 let parsed_text = parse_wikitext(
                     &raw_text,
                     title.map(ToString::to_string).unwrap_or_default(),
-                    |error| errors.push(error),
+                    |error| parser_errors.push(error),
                 );
+
+                let mut word_errors = Vec::new();
+                wikitext_to_words(&parsed_text, &mut word_consumer, |error| {
+                    word_errors.push(error)
+                });
 
                 let page_name = title.map(ToString::to_string).unwrap_or_default();
 
-                if !errors.is_empty() {
-                    debug!("Page '{page_name}' has {} errors", errors.len());
+                if !parser_errors.is_empty() || !word_errors.is_empty() {
+                    debug!("Page '{page_name}' has {} errors", parser_errors.len());
                     writeln!(error_log, "Page: {page_name}")
                         .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
                 }
-                for error in &errors {
+                for error in &parser_errors {
                     writeln!(error_log, "{error:#?}")
                         .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
                 }
-                if !errors.is_empty() {
+                for error in &word_errors {
+                    writeln!(error_log, "{error:#?}")
+                        .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
+                }
+                if !parser_errors.is_empty() || !word_errors.is_empty() {
                     writeln!(error_log, "\nContent: {raw_text}\n")
                         .unwrap_or_else(|error| panic!("Writing to error log failed: {error}"));
                 }
