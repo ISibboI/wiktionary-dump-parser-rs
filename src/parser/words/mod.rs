@@ -7,12 +7,12 @@ use crate::parser::Wikitext;
 
 lazy_static! {
     static ref IGNORED_PATTERN: Regex =
-        Regex::new("(Wiktionary:|Appendix:|Help:|Rhymes:).*").unwrap();
+        Regex::new("(Wiktionary:|Appendix:|Help:|Rhymes:|Template:|MediaWiki:|Citations:|Module:|Reconstruction:|Thesaurus:|Concordance:).*|.*(/derived terms)").unwrap();
     static ref WORD_TYPE_PATTERN: Regex =
-        Regex::new("Noun|Proper noun|Dependent noun|Participle|Verb|Preverb|Predicative|Conjugation|Adjective|Adverb|Adnominal|Inflection|Pronoun|Preposition|Postposition|Ambiposition|Conjunction|Initial|Prefix|Suffix|Final|Affix|Infix|Interfix|Clitic|Article|Particle|Determiner|Classifier|Contraction|Combining form|Enclitic|Relative|Phrase|Proverb|Idiom|Ideophone|Phonogram|Ligature|Syllable|Letter|Symbol|Counter|Number|Numeral|Multiple parts of speech|Punctuation mark|Root")
+        Regex::new("Word|Noun|Proper noun|Dependent noun|Prenoun|Participle|Verb|Preverb|Predicative|Conjugation|Adjective|Comparative-only adjectives|Determinative|Adverb|Adnominal|Inflection|Pronoun|Preposition|Postposition|Ambiposition|Circumposition|Conjunction|Initial|Prefix|Suffix|Final|Affix|Infix|Interfix|Circumfix|Clitic|Article|Particle|Determiner|Classifier|Contraction|Combining form|Compound part|Enclitic|Relative|Phrase|Proverb|Idiom|Ideophone|Phonogram|Onomatopoeia|Phoneme|Ligature|Syllable|Letter|Symbol|Counter|Number|Numeral|Multiple parts of speech|Punctuation mark|Diacritical mark|Root")
             .unwrap();
     static ref IGNORED_LANGUAGE_PATTERN: Regex = Regex::new("Translingual").unwrap();
-    static ref IGNORED_SUBSECTION_PATTERN: Regex = Regex::new("External Links|Related words|Standard form|Nom glyph origin|Readings|Synonyms|Antonyms|Hyponyms|Hypernyms|Paronyms|Translations|Coordinate terms|Dialectal variants|Romanization|Statistics|Declension|Alternative scripts|Phrasal verbs|Trivia|Han character|Hanzi|Glyph origin|Definitions|Compounds|Descendants|Kanji|Hanja|Notes|Derived terms|Usage notes|Alternative forms|Alternative|Etymology|Pronunciation( [1-9][0-9]*)?|Further reading|Anagrams|References?|Refs|Further references?|See ?also|Mutation|Interjection|Quotations|Gallery|Related terms").unwrap();
+    static ref IGNORED_SUBSECTION_PATTERN: Regex = Regex::new("Usage|Citations?|Examples?|Sources|User notes?|Work to be done|Stem|Sign values|Reconstruction|Production|Logogram|Holonyms?|Meronyms|Forms?|Dialectal synonyms?|Decadents?|Abbreviations?|Borrowed terms?|External (L|l)inks?|Related words?|Standard form|Nom glyph origin|Readings?|Synonyms?|Antonyms?|Hyponyms?|Hypernyms?|Paronyms?|Translations?|Coordinate terms?|Dialectal variants?|Romanization|Statistics?|Declension|Alternative scripts?|Phrasal verbs?|Trivia|Han character|Hanzi|Glyph origin|Definitions?|Compounds?|Descendants?|Kanji|Hanja|Notes?|Derived (t|T)erms?|Usage notes|Alternative forms|Alternative|Etymology|Pronunciation( [1-9][0-9]*)?|Further reading|Anagrams|References?|Refs|Further references?|See ?(a|A)lso|Mutation|Interjection|Quotations|Gallery|Related (t|T)erms?").unwrap();
 }
 
 pub struct Word {
