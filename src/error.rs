@@ -1,4 +1,4 @@
-use std::string::FromUtf8Error;
+use std::{fmt::Display, string::FromUtf8Error};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -30,6 +30,36 @@ pub enum Error {
     /// An error described by a string instead of a variant.
     Other(String),
 }
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::ReqwestError(error) => write!(f, "error sending http request: {error}"),
+            Error::RegexError(error) => write!(f, "regex error: {error}"),
+            Error::UrlParseError(error) => write!(f, "error parsing url: {error}"),
+            Error::SerdeJsonError(error) => write!(f, "json error: {error}"),
+            Error::IoError(error) => write!(f, "io error: {error}"),
+            Error::FromUtf8Error(error) => write!(f, "error parsing utf-8: {error}"),
+            Error::QuickXmlError(error) => write!(f, "error parsing xml: {error}"),
+            Error::QuickXmlAttributeError(error) => {
+                write!(f, "error parsing xml attribute: {error}")
+            }
+            Error::WikitextParserError {
+                error, page_name, ..
+            } => write!(f, "error parsing page {page_name:?}: {error}"),
+            Error::UnknownEnglishLanguageName(name) => {
+                write!(f, "unknown English language name: {name:?}")
+            }
+            Error::UnknownWiktionaryLanguageAbbreviation(abbreviation) => write!(
+                f,
+                "unknown wiktionary language abbreviation: {abbreviation}"
+            ),
+            Error::Other(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {

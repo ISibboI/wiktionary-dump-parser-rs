@@ -1463,9 +1463,9 @@ dependencies = [
 
 [[package]]
 name = "wikitext-parser"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab1269e0872a6ea6737f8bb2fdb22913b4ec8fd85d3346af10ff276e55c0a13f"
+checksum = "1677ea757db4a5cf0c3fe9fd8a744d50b694ad54408048fa7369408e87384324"
 dependencies = [
  "lazy_static",
  "log",
