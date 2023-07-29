@@ -19,7 +19,7 @@ pub async fn download_file_with_progress_log(
     from_url: &Url,
     to_path: impl Into<PathBuf>,
     expected_size: usize,
-    progress_delay: u64,
+    progress_delay_seconds: u64,
     md5: Option<&str>,
     sha1: Option<&str>,
 ) -> Result<PathBuf> {
@@ -67,11 +67,11 @@ pub async fn download_file_with_progress_log(
     let mut input_stream = url_connection.bytes_stream();
     let mut last_progress_output = Instant::now();
     let mut last_content_lengths: VecDeque<(u64, Instant)> = VecDeque::new();
-    let progress_delay = if progress_delay == 0 {
+    let progress_delay = if progress_delay_seconds == 0 {
         warn!("Progress delay was set to zero, but needs to be at least one. Changing to one.");
         1
     } else {
-        progress_delay
+        progress_delay_seconds
     };
     // Cannot fail as maximum value is 60.
     let retained_content_length_amount: usize = (60 / progress_delay).max(1).try_into().unwrap();

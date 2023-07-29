@@ -97,7 +97,7 @@ pub async fn download_language(
     base_url: &DumpBaseUrl,
     language_code: &LanguageCode,
     target_directory: impl Into<PathBuf>,
-    progress_delay: u64,
+    progress_delay_seconds: u64,
 ) -> Result<()> {
     let available_dates = list_available_dates(base_url, language_code).await?;
     debug!("Available dates: {available_dates:?}");
@@ -157,7 +157,7 @@ pub async fn download_language(
             &url,
             target_file,
             properties.size,
-            progress_delay,
+            progress_delay_seconds,
             Some(&properties.md5),
             Some(&properties.sha1),
         )
