@@ -7,7 +7,7 @@ use crate::urls::{available_dates, dump_status_file, dump_url, DumpBaseUrl, Dump
 use error::Result;
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -26,6 +26,8 @@ lazy_static! {
         Regex::new(r#"<a href=".*([0-9]{8})/?">"#).unwrap();
 }
 
+/// Query wiktionary to get a list of languages that wiktionary dumps are available in.
+/// These are the languages wiktionary itself exists in, not the languages it has data about.
 pub async fn list_wiktionary_dump_languages(url: &DumpIndexUrl) -> Result<Vec<LanguageCode>> {
     let body = reqwest::get(url.as_str()).await?.text().await?;
     trace!("{body}");
@@ -47,6 +49,7 @@ pub async fn list_wiktionary_dump_languages(url: &DumpIndexUrl) -> Result<Vec<La
         .collect())
 }
 
+/// Given a language code, list the available dates for which dumps exist.
 pub async fn list_available_dates(
     base_url: &DumpBaseUrl,
     language_code: &LanguageCode,
@@ -89,6 +92,7 @@ pub struct DumpStatusFileEntryFile {
     sha1: String,
 }
 
+/// Download the latest dump of wiktionary in the given language.
 pub async fn download_language(
     base_url: &DumpBaseUrl,
     language_code: &LanguageCode,
@@ -145,15 +149,20 @@ pub async fn download_language(
     target_file.push(language_abbreviation);
     target_file.push(date);
     target_file.push(file_name);
-    download_file_with_progress_log(
-        &url,
-        target_file,
-        properties.size,
-        progress_delay,
-        Some(&properties.md5),
-        Some(&properties.sha1),
-    )
-    .await?;
+
+    if target_file.exists() {
+        info!("Skipping download, because file exists already.");
+    } else {
+        download_file_with_progress_log(
+            &url,
+            target_file,
+            properties.size,
+            progress_delay,
+            Some(&properties.md5),
+            Some(&properties.sha1),
+        )
+        .await?;
+    }
 
     Ok(())
 }
