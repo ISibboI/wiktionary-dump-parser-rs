@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use wikitext_parser::Section;
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::parser::Wikitext;
 
 lazy_static! {
@@ -29,15 +29,18 @@ pub struct Word {
     pub word_type: String,
 }
 
+/// Extract words from a wiktionary page.
+/// Errors while extracting are handed to `error_consumer`,
+/// while errors while consuming results are returned.
 pub fn wikitext_to_words(
     title: &str,
     wikitext: &Wikitext,
-    mut result_consumer: impl FnMut(Word),
+    mut result_consumer: impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     mut error_consumer: impl FnMut(Error),
-) {
+) -> Result<()> {
     if IGNORED_PATTERN.is_match(title) {
         // silently ignore non-words
-        return;
+        return Ok(());
     }
 
     let root_section = &wikitext.root_section;
@@ -46,25 +49,27 @@ pub fn wikitext_to_words(
         let word = &root_section.headline.label;
 
         for subsection in &root_section.subsections {
-            parse_language_subsection(word, subsection, &mut result_consumer, &mut error_consumer);
+            parse_language_subsection(word, subsection, &mut result_consumer, &mut error_consumer)?;
         }
     } else {
         error_consumer(Error::Other(
             "Root section is not at headline level 1".to_string(),
         ));
     }
+
+    Ok(())
 }
 
 fn parse_language_subsection(
     word: &str,
     language_subsection: &Section,
-    result_consumer: &mut impl FnMut(Word),
+    result_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     error_consumer: &mut impl FnMut(Error),
-) {
+) -> Result<()> {
     let language_english_name = language_subsection.headline.label.as_str();
     if IGNORED_LANGUAGE_PATTERN.is_match(language_english_name) {
         // silently ignore high-level metalanguages
-        return;
+        return Ok(());
     }
 
     if language_subsection.subsections.is_empty() {
@@ -72,7 +77,8 @@ fn parse_language_subsection(
             word: word.to_string(),
             language_english_name: language_english_name.to_string(),
             word_type: "Unknown".to_string(),
-        });
+        })
+        .map_err(|error| Error::WordConsumer { source: error })?;
     } else {
         let mut toplevel_details = false;
         let mut bottomlevel_details = false;
@@ -93,7 +99,7 @@ fn parse_language_subsection(
                     unknown_subsection,
                     result_consumer,
                     error_consumer,
-                );
+                )?;
             } else if IGNORED_SUBSECTION_PATTERN.is_match(&unknown_subsection.headline.label) {
                 // ignore
             } else {
@@ -111,7 +117,7 @@ fn parse_language_subsection(
                 language_subsection,
                 result_consumer,
                 error_consumer,
-            );
+            )?;
         }
 
         if toplevel_details && bottomlevel_details {
@@ -126,15 +132,17 @@ fn parse_language_subsection(
             }
         }
     }
+
+    Ok(())
 }
 
 fn parse_details_subsection(
     word: &str,
     language_english_name: &str,
     details_subsection: &Section,
-    result_consumer: &mut impl FnMut(Word),
+    result_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     error_consumer: &mut impl FnMut(Error),
-) {
+) -> Result<()> {
     for details_section in &details_subsection.subsections {
         let word_type = &details_section.headline.label;
         if WORD_TYPE_PATTERN.is_match(word_type) {
@@ -142,7 +150,8 @@ fn parse_details_subsection(
                 word: word.to_string(),
                 language_english_name: language_english_name.to_string(),
                 word_type: word_type.clone(),
-            });
+            })
+            .map_err(|error| Error::WordConsumer { source: error })?;
         } else if IGNORED_SUBSECTION_PATTERN.is_match(word_type) {
             // ignore
         } else {
@@ -151,4 +160,6 @@ fn parse_details_subsection(
             )));
         }
     }
+
+    Ok(())
 }

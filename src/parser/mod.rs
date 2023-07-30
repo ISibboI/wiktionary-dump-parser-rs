@@ -58,7 +58,7 @@ impl<R: Read + Unpin> AsyncRead for TokioReadAdapter<R> {
 pub async fn parse_dump_file(
     input_file: impl AsRef<Path>,
     output_file: Option<impl AsRef<Path>>,
-    mut word_consumer: impl FnMut(Word),
+    mut word_consumer: impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     error_log: impl AsRef<Path>,
     output_pretty: bool,
 ) -> Result<()> {
@@ -159,7 +159,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
     input_stream: InputStream,
     input_progress: Box<dyn Fn(&InputStream) -> (Result<u64>, u64)>,
     mut output_stream: Option<impl Write>,
-    word_consumer: &mut impl FnMut(Word),
+    word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     mut error_log: impl Write,
     output_pretty: bool,
 ) -> Result<()> {
@@ -460,7 +460,7 @@ pub struct Page {
 async fn parse_page<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
     reader: &mut Reader<InputStream>,
-    word_consumer: &mut impl FnMut(Word),
+    word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Page> {
@@ -586,7 +586,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
     title: Option<String>,
     reader: &mut Reader<InputStream>,
-    word_consumer: &mut impl FnMut(Word),
+    word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Revision> {
@@ -811,7 +811,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
     attributes: Attributes<'attributes>,
     title: Option<&str>,
     reader: &mut Reader<InputStream>,
-    mut word_consumer: &mut impl FnMut(Word),
+    mut word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Text> {
@@ -903,7 +903,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
                 let mut word_errors = Vec::new();
                 wikitext_to_words(&page_name, &parsed_text, &mut word_consumer, |error| {
                     word_errors.push(error)
-                });
+                })?;
 
                 if !parser_errors.is_empty() || !word_errors.is_empty() {
                     debug!("Page '{page_name}' has {} errors", parser_errors.len());
