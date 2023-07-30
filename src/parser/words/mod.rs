@@ -21,8 +21,8 @@ pub struct Word {
     pub word: String,
 
     /// The english name of the language this word is from.
-    /// While different languanges may contain the same words, there will be a separate word instance for each.
-    pub languange_english_name: String,
+    /// While different languages may contain the same words, there will be a separate word instance for each.
+    pub language_english_name: String,
 
     /// The word type, as declared by wiktionary.
     /// While a word may have multiple types, there will be a separate word instance for each.
@@ -70,7 +70,7 @@ fn parse_language_subsection(
     if language_subsection.subsections.is_empty() {
         result_consumer(Word {
             word: word.to_string(),
-            languange_english_name: language_english_name.to_string(),
+            language_english_name: language_english_name.to_string(),
             word_type: "Unknown".to_string(),
         });
     } else {
@@ -140,7 +140,7 @@ fn parse_details_subsection(
         if WORD_TYPE_PATTERN.is_match(word_type) {
             result_consumer(Word {
                 word: word.to_string(),
-                languange_english_name: language_english_name.to_string(),
+                language_english_name: language_english_name.to_string(),
                 word_type: word_type.clone(),
             });
         } else if IGNORED_SUBSECTION_PATTERN.is_match(word_type) {
