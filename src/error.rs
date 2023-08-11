@@ -43,5 +43,7 @@ pub enum Error {
     Other(String),
 
     #[error("error consuming parsed word: {source}")]
-    WordConsumer { source: Box<dyn std::error::Error> },
+    WordConsumer {
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }

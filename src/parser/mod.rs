@@ -58,7 +58,10 @@ impl<R: Read + Unpin> AsyncRead for TokioReadAdapter<R> {
 pub async fn parse_dump_file(
     input_file: impl AsRef<Path>,
     output_file: Option<impl AsRef<Path>>,
-    mut word_consumer: impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    mut word_consumer: impl FnMut(
+        Word,
+    )
+        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
     error_log: impl AsRef<Path>,
     output_pretty: bool,
 ) -> Result<()> {
@@ -159,7 +162,10 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
     input_stream: InputStream,
     input_progress: Box<dyn Fn(&InputStream) -> (Result<u64>, u64)>,
     mut output_stream: Option<impl Write>,
-    word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    word_consumer: &mut impl FnMut(
+        Word,
+    )
+        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
     mut error_log: impl Write,
     output_pretty: bool,
 ) -> Result<()> {
@@ -460,7 +466,10 @@ pub struct Page {
 async fn parse_page<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
     reader: &mut Reader<InputStream>,
-    word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    word_consumer: &mut impl FnMut(
+        Word,
+    )
+        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Page> {
@@ -586,7 +595,10 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
     mut attributes: Attributes<'attributes>,
     title: Option<String>,
     reader: &mut Reader<InputStream>,
-    word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    word_consumer: &mut impl FnMut(
+        Word,
+    )
+        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Revision> {
@@ -811,7 +823,12 @@ async fn parse_text<'attributes, InputStream: BufRead>(
     attributes: Attributes<'attributes>,
     title: Option<&str>,
     reader: &mut Reader<InputStream>,
-    mut word_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    mut word_consumer: &mut impl FnMut(
+        Word,
+    ) -> std::result::Result<
+        (),
+        Box<dyn std::error::Error + Send + Sync>,
+    >,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Text> {

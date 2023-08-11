@@ -35,7 +35,10 @@ pub struct Word {
 pub fn wikitext_to_words(
     title: &str,
     wikitext: &Wikitext,
-    mut result_consumer: impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    mut result_consumer: impl FnMut(
+        Word,
+    )
+        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
     mut error_consumer: impl FnMut(Error),
 ) -> Result<()> {
     if IGNORED_PATTERN.is_match(title) {
@@ -63,7 +66,12 @@ pub fn wikitext_to_words(
 fn parse_language_subsection(
     word: &str,
     language_subsection: &Section,
-    result_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    result_consumer: &mut impl FnMut(
+        Word,
+    ) -> std::result::Result<
+        (),
+        Box<dyn std::error::Error + Send + Sync>,
+    >,
     error_consumer: &mut impl FnMut(Error),
 ) -> Result<()> {
     let language_english_name = language_subsection.headline.label.as_str();
@@ -140,7 +148,12 @@ fn parse_details_subsection(
     word: &str,
     language_english_name: &str,
     details_subsection: &Section,
-    result_consumer: &mut impl FnMut(Word) -> std::result::Result<(), Box<dyn std::error::Error>>,
+    result_consumer: &mut impl FnMut(
+        Word,
+    ) -> std::result::Result<
+        (),
+        Box<dyn std::error::Error + Send + Sync>,
+    >,
     error_consumer: &mut impl FnMut(Error),
 ) -> Result<()> {
     for details_section in &details_subsection.subsections {
