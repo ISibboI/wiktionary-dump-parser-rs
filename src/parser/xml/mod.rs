@@ -1,8 +1,10 @@
 use crate::error::Result;
 use log::{debug, trace};
-use quick_xml::events::{BytesEnd, BytesStart, Event};
-use quick_xml::Reader;
-use std::io::BufRead;
+use quick_xml::{
+    events::{BytesEnd, BytesStart, Event},
+    Reader,
+};
+use tokio::io::AsyncBufRead;
 
 #[derive(Clone, Debug)]
 pub enum RelevantEvent<'a> {
@@ -18,14 +20,14 @@ pub enum RelevantEvent<'a> {
     Eof,
 }
 
-pub fn read_relevant_event(
-    reader: &mut Reader<impl BufRead>,
+pub async fn read_relevant_event(
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     buffer: &mut Vec<u8>,
 ) -> Result<RelevantEvent<'static>> {
     let relevant_event;
 
     loop {
-        match reader.read_event_into(buffer)?.into_owned() {
+        match reader.read_event_into_async(buffer).await?.into_owned() {
             Event::Start(tag) => {
                 relevant_event = RelevantEvent::Start(tag);
                 break;

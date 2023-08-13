@@ -2,7 +2,7 @@ use crate::error::Result;
 use crate::parser::words::wikitext_to_words;
 use crate::parser::xml::{read_relevant_event, RelevantEvent};
 use crate::Error;
-use bzip2::bufread::MultiBzDecoder;
+use async_compression::tokio::bufread::BzDecoder;
 use log::{debug, info, trace, warn};
 use quick_xml::events::attributes::Attributes;
 use quick_xml::name::QName;
@@ -10,11 +10,14 @@ use quick_xml::Reader;
 use serde::Deserialize;
 use serde::Serialize;
 use std::ffi::OsStr;
-use std::io::{BufRead, Read, Seek, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, ReadBuf};
+use tokio::fs::File;
+use tokio::io::{
+    AsyncBufRead, AsyncRead, AsyncSeekExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter, ReadBuf,
+};
 use tokio::time::Duration;
 use tokio::time::Instant;
 use wikitext_parser::{parse_wikitext, Wikitext};
@@ -80,14 +83,18 @@ pub async fn parse_dump_file(
 
         debug!("Found file extension '.xml.bz2' for input file {input_file:?}");
 
-        let input_file = std::fs::File::open(input_file)?;
-        let input_size = input_file.metadata()?.len();
-        let input_stream = std::io::BufReader::with_capacity(
+        let input_file = File::open(input_file).await?;
+        let input_size = input_file.metadata().await?.len();
+        let input_stream = BufReader::with_capacity(
             1024 * 1024,
-            MultiBzDecoder::new(std::io::BufReader::new(input_file)),
+            BzDecoder::new(BufReader::with_capacity(1024 * 1024, input_file)),
         );
+
         let output_stream = if let Some(output_file) = output_file {
-            Some(std::io::BufWriter::new(std::fs::File::create(output_file)?))
+            Some(BufWriter::with_capacity(
+                1024 * 1024,
+                File::create(output_file).await?,
+            ))
         } else {
             None
         };
@@ -96,17 +103,8 @@ pub async fn parse_dump_file(
         // File is compressed, so input size is not accurate
         parse_dump_file_with_streams(
             input_stream,
-            Box::new(move |input_stream| {
-                (
-                    input_stream
-                        .get_ref()
-                        .get_ref()
-                        .get_ref()
-                        .stream_position()
-                        .map_err(Into::into),
-                    input_size,
-                )
-            }),
+            |input_stream| input_stream.get_mut().get_mut().get_mut(),
+            input_size,
             output_stream,
             &mut word_consumer,
             error_log,
@@ -120,11 +118,14 @@ pub async fn parse_dump_file(
     {
         debug!("Found file extension '.xml' for input file {input_file:?}");
 
-        let input_file = std::fs::File::open(input_file)?;
-        let input_size = input_file.metadata()?.len();
-        let input_stream = std::io::BufReader::with_capacity(1024 * 1024, input_file);
+        let input_file = File::open(input_file).await?;
+        let input_size = input_file.metadata().await?.len();
+        let input_stream = BufReader::with_capacity(1024 * 1024, input_file);
         let output_stream = if let Some(output_file) = output_file {
-            Some(std::io::BufWriter::new(std::fs::File::create(output_file)?))
+            Some(BufWriter::with_capacity(
+                1024 * 1024,
+                File::create(output_file).await?,
+            ))
         } else {
             None
         };
@@ -132,12 +133,8 @@ pub async fn parse_dump_file(
 
         parse_dump_file_with_streams(
             input_stream,
-            Box::new(move |input_stream| {
-                (
-                    input_stream.get_ref().stream_position().map_err(Into::into),
-                    input_size,
-                )
-            }),
+            |input_stream| input_stream.get_mut(),
+            input_size,
             output_stream,
             &mut word_consumer,
             error_log,
@@ -154,10 +151,11 @@ pub async fn parse_dump_file(
 }
 
 #[allow(clippy::type_complexity)]
-async fn parse_dump_file_with_streams<InputStream: BufRead>(
+async fn parse_dump_file_with_streams<InputStream: AsyncBufRead + Unpin>(
     input_stream: InputStream,
-    input_progress: Box<dyn Fn(&InputStream) -> (Result<u64>, u64)>,
-    mut output_stream: Option<impl Write>,
+    input_stream_to_file: impl Fn(&mut InputStream) -> &mut File,
+    input_size: u64,
+    mut output_stream: Option<impl AsyncWrite + Unpin>,
     word_consumer: &mut impl FnMut(
         Word,
     )
@@ -169,14 +167,15 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
     let mut buffer = Vec::new();
     let mut last_progress_log = Instant::now();
     let mut tag_stack = Vec::new();
+    let mut json_buffer = Vec::new();
 
     loop {
         let current_time = Instant::now();
         if current_time - last_progress_log >= Duration::from_secs(10) {
             last_progress_log = current_time;
 
-            let (current, input_size) = input_progress(reader.get_ref());
-            let current = current?;
+            let input_file = input_stream_to_file(reader.get_mut());
+            let current = input_file.stream_position().await?;
             let current_mib = current / (1024 * 1024);
             let input_size_mib = input_size / (1024 * 1024);
 
@@ -184,7 +183,7 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
         }
 
         let level = tag_stack.len();
-        match read_relevant_event(&mut reader, &mut buffer) {
+        match read_relevant_event(&mut reader, &mut buffer).await {
             Ok(event) => match event {
                 RelevantEvent::Start(tag) => {
                     let tag_name = String::from_utf8(tag.name().into_inner().to_vec())?;
@@ -206,11 +205,13 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                                     siteinfo.sitename, siteinfo.dbname, siteinfo.generator
                                 );
                                 if let Some(output_stream) = output_stream.as_mut() {
+                                    json_buffer.clear();
                                     if output_pretty {
-                                        serde_json::to_writer_pretty(output_stream, &siteinfo)?;
+                                        serde_json::to_writer_pretty(&mut json_buffer, &siteinfo)?;
                                     } else {
-                                        serde_json::to_writer(output_stream, &siteinfo)?;
+                                        serde_json::to_writer(&mut json_buffer, &siteinfo)?;
                                     }
+                                    output_stream.write_all(&json_buffer).await?;
                                 }
                             }
                             "page" => {
@@ -224,11 +225,13 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
                                 .await?;
                                 trace!("{page:?}");
                                 if let Some(output_stream) = output_stream.as_mut() {
+                                    json_buffer.clear();
                                     if output_pretty {
-                                        serde_json::to_writer_pretty(output_stream, &page)?;
+                                        serde_json::to_writer_pretty(&mut json_buffer, &page)?;
                                     } else {
-                                        serde_json::to_writer(output_stream, &page)?;
+                                        serde_json::to_writer(&mut json_buffer, &page)?;
                                     }
+                                    output_stream.write_all(&json_buffer).await?;
                                 }
                             }
                             _ => {
@@ -270,9 +273,9 @@ async fn parse_dump_file_with_streams<InputStream: BufRead>(
     Ok(())
 }
 
-async fn parse_siteinfo<'attributes, InputStream: BufRead>(
-    mut attributes: Attributes<'attributes>,
-    reader: &mut Reader<InputStream>,
+async fn parse_siteinfo(
+    mut attributes: Attributes<'_>,
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     buffer: &mut Vec<u8>,
 ) -> Result<Siteinfo> {
     if let Some(attribute) = attributes.next() {
@@ -287,7 +290,7 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
     let mut namespaces = None;
 
     loop {
-        match read_relevant_event(reader, buffer)? {
+        match read_relevant_event(reader, buffer).await? {
             RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"sitename" => {
                     sitename =
@@ -362,9 +365,9 @@ async fn parse_siteinfo<'attributes, InputStream: BufRead>(
     }
 }
 
-async fn parse_namespaces<'attributes, InputStream: BufRead>(
-    mut attributes: Attributes<'attributes>,
-    reader: &mut Reader<InputStream>,
+async fn parse_namespaces(
+    mut attributes: Attributes<'_>,
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     buffer: &mut Vec<u8>,
 ) -> Result<Vec<Namespace>> {
     if let Some(attribute) = attributes.next() {
@@ -379,7 +382,7 @@ async fn parse_namespaces<'attributes, InputStream: BufRead>(
     let mut namespaces = Vec::new();
 
     loop {
-        match read_relevant_event(reader, buffer)? {
+        match read_relevant_event(reader, buffer).await? {
             RelevantEvent::Start(tag) => {
                 if tag.name() == QName(b"namespace") {
                     if current_namespace_tag.is_some() {
@@ -459,9 +462,9 @@ pub struct Page {
     redirect: Option<String>,
 }
 
-async fn parse_page<'attributes, InputStream: BufRead>(
-    mut attributes: Attributes<'attributes>,
-    reader: &mut Reader<InputStream>,
+async fn parse_page(
+    mut attributes: Attributes<'_>,
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     word_consumer: &mut impl FnMut(
         Word,
     )
@@ -480,7 +483,7 @@ async fn parse_page<'attributes, InputStream: BufRead>(
     let mut redirect = None;
 
     loop {
-        match read_relevant_event(reader, buffer)? {
+        match read_relevant_event(reader, buffer).await? {
             RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"title" => {
                     title = Some(parse_string("title", tag.attributes(), reader, buffer).await?);
@@ -587,10 +590,10 @@ pub struct Revision {
     minor: bool,
 }
 
-async fn parse_revision<'attributes, InputStream: BufRead>(
-    mut attributes: Attributes<'attributes>,
+async fn parse_revision(
+    mut attributes: Attributes<'_>,
     title: Option<String>,
-    reader: &mut Reader<InputStream>,
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     word_consumer: &mut impl FnMut(
         Word,
     )
@@ -614,7 +617,7 @@ async fn parse_revision<'attributes, InputStream: BufRead>(
     let mut minor = false;
 
     loop {
-        match read_relevant_event(reader, buffer)? {
+        match read_relevant_event(reader, buffer).await? {
             RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"id" => {
                     id = Some(
@@ -740,9 +743,9 @@ pub enum Contributor {
     Anonymous { ip: String },
 }
 
-async fn parse_contributor<'attributes, InputStream: BufRead>(
-    mut attributes: Attributes<'attributes>,
-    reader: &mut Reader<InputStream>,
+async fn parse_contributor(
+    mut attributes: Attributes<'_>,
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     buffer: &mut Vec<u8>,
 ) -> Result<Contributor> {
     if let Some(attribute) = attributes.next() {
@@ -754,7 +757,7 @@ async fn parse_contributor<'attributes, InputStream: BufRead>(
     let mut ip = None;
 
     loop {
-        match read_relevant_event(reader, buffer)? {
+        match read_relevant_event(reader, buffer).await? {
             RelevantEvent::Start(tag) => match tag.name().into_inner() {
                 b"username" => {
                     username =
@@ -815,10 +818,10 @@ pub enum XmlSpace {
     Preserve,
 }
 
-async fn parse_text<'attributes, InputStream: BufRead>(
-    attributes: Attributes<'attributes>,
+async fn parse_text(
+    attributes: Attributes<'_>,
     title: Option<&str>,
-    reader: &mut Reader<InputStream>,
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     mut word_consumer: &mut impl FnMut(
         Word,
     ) -> std::result::Result<
@@ -864,7 +867,7 @@ async fn parse_text<'attributes, InputStream: BufRead>(
     let mut text = None;
 
     loop {
-        match read_relevant_event(reader, buffer)? {
+        match read_relevant_event(reader, buffer).await? {
             RelevantEvent::Start(tag) => {
                 return Err(Error::Other(format!("Found unexpected tag {tag:?}")));
             }
@@ -943,10 +946,10 @@ async fn parse_text<'attributes, InputStream: BufRead>(
     }
 }
 
-async fn parse_string<'attributes, InputStream: BufRead>(
+async fn parse_string(
     name: impl AsRef<[u8]>,
-    mut attributes: Attributes<'attributes>,
-    reader: &mut Reader<InputStream>,
+    mut attributes: Attributes<'_>,
+    reader: &mut Reader<impl AsyncBufRead + Unpin>,
     buffer: &mut Vec<u8>,
 ) -> Result<String> {
     let name = name.as_ref();
@@ -957,7 +960,7 @@ async fn parse_string<'attributes, InputStream: BufRead>(
     let mut value = String::new();
 
     loop {
-        match read_relevant_event(reader, buffer)? {
+        match read_relevant_event(reader, buffer).await? {
             RelevantEvent::Start(tag) => {
                 return Err(Error::Other(format!("Found unexpected tag {tag:?}")));
             }
