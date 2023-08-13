@@ -9,6 +9,7 @@ use quick_xml::name::QName;
 use quick_xml::Reader;
 use serde::Deserialize;
 use serde::Serialize;
+use std::ffi::OsStr;
 use std::io::{BufRead, Read, Seek, Write};
 use std::path::Path;
 use std::pin::Pin;
@@ -68,12 +69,7 @@ pub async fn parse_dump_file(
     let input_file = input_file.as_ref();
     let output_file = output_file.as_ref();
 
-    // TODO check how to do this better when we have internet again
-    if input_file
-        .extension()
-        .filter(|extension| extension.to_str() == Some("bz2"))
-        .is_some()
-    {
+    if input_file.extension().map(OsStr::to_str) == Some(Some("bz2")) {
         if input_file
             .file_stem()
             .map(|stem| stem.to_str().filter(|stem| stem.ends_with("xml")).is_some())
