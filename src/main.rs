@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
             parse_dump_file(
                 &input_file,
                 Some(&output_file),
-                |_| Ok(()),
+                |_| std::future::ready(Ok(())),
                 &error_log,
                 output_pretty,
             )

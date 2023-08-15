@@ -10,6 +10,7 @@ use quick_xml::Reader;
 use serde::Deserialize;
 use serde::Serialize;
 use std::ffi::OsStr;
+use std::future::Future;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::pin::Pin;
@@ -59,13 +60,12 @@ impl<R: Read + Unpin> AsyncRead for TokioReadAdapter<R> {
     }
 }
 
-pub async fn parse_dump_file(
+pub async fn parse_dump_file<
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     input_file: impl AsRef<Path>,
     output_file: Option<impl AsRef<Path>>,
-    mut word_consumer: impl FnMut(
-        Word,
-    )
-        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    mut word_consumer: impl FnMut(Word) -> WordConsumerResult,
     error_log: impl AsRef<Path>,
     output_pretty: bool,
 ) -> Result<()> {
@@ -151,15 +151,15 @@ pub async fn parse_dump_file(
 }
 
 #[allow(clippy::type_complexity)]
-async fn parse_dump_file_with_streams<InputStream: AsyncBufRead + Unpin>(
+async fn parse_dump_file_with_streams<
+    InputStream: AsyncBufRead + Unpin,
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     input_stream: InputStream,
     input_stream_to_file: impl Fn(&mut InputStream) -> &mut File,
     input_size: u64,
     mut output_stream: Option<impl AsyncWrite + Unpin>,
-    word_consumer: &mut impl FnMut(
-        Word,
-    )
-        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    word_consumer: &mut impl FnMut(Word) -> WordConsumerResult,
     mut error_log: impl Write,
     output_pretty: bool,
 ) -> Result<()> {
@@ -462,13 +462,12 @@ pub struct Page {
     redirect: Option<String>,
 }
 
-async fn parse_page(
+async fn parse_page<
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     mut attributes: Attributes<'_>,
     reader: &mut Reader<impl AsyncBufRead + Unpin>,
-    word_consumer: &mut impl FnMut(
-        Word,
-    )
-        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    word_consumer: &mut impl FnMut(Word) -> WordConsumerResult,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Page> {
@@ -590,14 +589,13 @@ pub struct Revision {
     minor: bool,
 }
 
-async fn parse_revision(
+async fn parse_revision<
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     mut attributes: Attributes<'_>,
     title: Option<String>,
     reader: &mut Reader<impl AsyncBufRead + Unpin>,
-    word_consumer: &mut impl FnMut(
-        Word,
-    )
-        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    word_consumer: &mut impl FnMut(Word) -> WordConsumerResult,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Revision> {
@@ -818,16 +816,13 @@ pub enum XmlSpace {
     Preserve,
 }
 
-async fn parse_text(
+async fn parse_text<
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     attributes: Attributes<'_>,
     title: Option<&str>,
     reader: &mut Reader<impl AsyncBufRead + Unpin>,
-    mut word_consumer: &mut impl FnMut(
-        Word,
-    ) -> std::result::Result<
-        (),
-        Box<dyn std::error::Error + Send + Sync>,
-    >,
+    mut word_consumer: &mut impl FnMut(Word) -> WordConsumerResult,
     buffer: &mut Vec<u8>,
     error_log: &mut impl Write,
 ) -> Result<Text> {
@@ -919,7 +914,8 @@ async fn parse_text(
                 let mut word_errors = Vec::new();
                 wikitext_to_words(&page_name, &parsed_text, &mut word_consumer, |error| {
                     word_errors.push(error)
-                })?;
+                })
+                .await?;
 
                 if !parser_errors.is_empty() || !word_errors.is_empty() {
                     debug!("Page '{page_name}' has {} errors", parser_errors.len());

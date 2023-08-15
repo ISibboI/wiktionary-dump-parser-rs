@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::future::Future;
 use wikitext_parser::Section;
 
 use crate::error::{Error, Result};
@@ -32,13 +33,12 @@ pub struct Word {
 /// Extract words from a wiktionary page.
 /// Errors while extracting are handed to `error_consumer`,
 /// while errors while consuming results are returned.
-pub fn wikitext_to_words(
+pub async fn wikitext_to_words<
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     title: &str,
     wikitext: &Wikitext,
-    mut result_consumer: impl FnMut(
-        Word,
-    )
-        -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    mut result_consumer: impl FnMut(Word) -> WordConsumerResult,
     mut error_consumer: impl FnMut(Error),
 ) -> Result<()> {
     if IGNORED_PATTERN.is_match(title) {
@@ -52,7 +52,8 @@ pub fn wikitext_to_words(
         let word = &root_section.headline.label;
 
         for subsection in &root_section.subsections {
-            parse_language_subsection(word, subsection, &mut result_consumer, &mut error_consumer)?;
+            parse_language_subsection(word, subsection, &mut result_consumer, &mut error_consumer)
+                .await?;
         }
     } else {
         error_consumer(Error::Other(
@@ -63,15 +64,12 @@ pub fn wikitext_to_words(
     Ok(())
 }
 
-fn parse_language_subsection(
+async fn parse_language_subsection<
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     word: &str,
     language_subsection: &Section,
-    result_consumer: &mut impl FnMut(
-        Word,
-    ) -> std::result::Result<
-        (),
-        Box<dyn std::error::Error + Send + Sync>,
-    >,
+    result_consumer: &mut impl FnMut(Word) -> WordConsumerResult,
     error_consumer: &mut impl FnMut(Error),
 ) -> Result<()> {
     let language_english_name = language_subsection.headline.label.as_str();
@@ -86,6 +84,7 @@ fn parse_language_subsection(
             language_english_name: language_english_name.to_string(),
             word_type: "Unknown".to_string(),
         })
+        .await
         .map_err(|error| Error::WordConsumer { source: error })?;
     } else {
         let mut toplevel_details = false;
@@ -107,7 +106,8 @@ fn parse_language_subsection(
                     unknown_subsection,
                     result_consumer,
                     error_consumer,
-                )?;
+                )
+                .await?;
             } else if IGNORED_SUBSECTION_PATTERN.is_match(&unknown_subsection.headline.label) {
                 // ignore
             } else {
@@ -125,7 +125,8 @@ fn parse_language_subsection(
                 language_subsection,
                 result_consumer,
                 error_consumer,
-            )?;
+            )
+            .await?;
         }
 
         if toplevel_details && bottomlevel_details {
@@ -144,16 +145,13 @@ fn parse_language_subsection(
     Ok(())
 }
 
-fn parse_details_subsection(
+async fn parse_details_subsection<
+    WordConsumerResult: Future<Output = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+>(
     word: &str,
     language_english_name: &str,
     details_subsection: &Section,
-    result_consumer: &mut impl FnMut(
-        Word,
-    ) -> std::result::Result<
-        (),
-        Box<dyn std::error::Error + Send + Sync>,
-    >,
+    result_consumer: &mut impl FnMut(Word) -> WordConsumerResult,
     error_consumer: &mut impl FnMut(Error),
 ) -> Result<()> {
     for details_section in &details_subsection.subsections {
@@ -164,6 +162,7 @@ fn parse_details_subsection(
                 language_english_name: language_english_name.to_string(),
                 word_type: word_type.clone(),
             })
+            .await
             .map_err(|error| Error::WordConsumer { source: error })?;
         } else if IGNORED_SUBSECTION_PATTERN.is_match(word_type) {
             // ignore
